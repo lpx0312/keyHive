@@ -88,7 +88,8 @@ jobs:
           CN_ARGS=""
           if [ "$USE_CN_MIRROR" = "true" ]; then CN_ARGS="--build-arg USE_CN_MIRROR=1"; fi
           # all 模式推 -amd64 后缀单架构 tag；单架构模式直接推不带后缀 tag
-          if [ "${ARCHITECTURE}" = "all" ]; then SUFFIX="-amd64"; else SUFFIX=""; fi
+          # 注意用输入的 ARCH_MODE 判断（ARCHITECTURE 是本 job 硬编码架构名）
+          if [ "${ARCH_MODE}" = "all" ]; then SUFFIX="-amd64"; else SUFFIX=""; fi
 
           IFS=',' read -ra TAGS <<< "$IMAGE_TAGS"
           BUILD_ARGS=()
@@ -104,6 +105,7 @@ jobs:
           IMAGE_NAME: ${{ github.event.inputs.image_name || 'keyhive' }}
           IMAGE_TAGS: ${{ github.event.inputs.image_tags || 'latest' }}
           ARCHITECTURE: amd64
+          ARCH_MODE: ${{ github.event.inputs.architecture || 'all' }}
           USE_CN_MIRROR: ${{ github.event.inputs.use_cn_mirror }}
           ALIYUN_REGISTRY_USER: ${{ vars.ALIYUN_REGISTRY_USER }}
           ALIYUN_REGISTRY_PASSWORD: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
@@ -143,7 +145,7 @@ jobs:
           echo "${REGISTRY_PASSWORD}" | docker login "${REGISTRY}" -u "${REGISTRY_USER}" --password-stdin
           CN_ARGS=""
           if [ "$USE_CN_MIRROR" = "true" ]; then CN_ARGS="--build-arg USE_CN_MIRROR=1"; fi
-          if [ "${ARCHITECTURE}" = "all" ]; then SUFFIX="-arm64"; else SUFFIX=""; fi
+          if [ "${ARCH_MODE}" = "all" ]; then SUFFIX="-arm64"; else SUFFIX=""; fi
 
           IFS=',' read -ra TAGS <<< "$IMAGE_TAGS"
           BUILD_ARGS=()
@@ -159,6 +161,7 @@ jobs:
           IMAGE_NAME: ${{ github.event.inputs.image_name || 'keyhive' }}
           IMAGE_TAGS: ${{ github.event.inputs.image_tags || 'latest' }}
           ARCHITECTURE: arm64
+          ARCH_MODE: ${{ github.event.inputs.architecture || 'all' }}
           USE_CN_MIRROR: ${{ github.event.inputs.use_cn_mirror }}
           ALIYUN_REGISTRY_USER: ${{ vars.ALIYUN_REGISTRY_USER }}
           ALIYUN_REGISTRY_PASSWORD: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
