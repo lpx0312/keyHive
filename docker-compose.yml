@@ -1,0 +1,20 @@
+services:
+  keyhive:
+    build:
+      context: .
+      # 走国内源构建（npm → npmmirror，Go → goproxy.cn）；改回 "0" 用官方源
+      args:
+        USE_CN_MIRROR: "1"
+    image: keyhive:latest
+    container_name: keyhive
+    restart: unless-stopped
+    ports:
+      - "8020:8020"
+    environment:
+      # 主密钥：生产环境务必通过环境变量注入（与数据卷分离）；
+      # 不设置则自动生成并保存到数据卷 master.key（内网自用可接受）
+      - KEYHIVE_MASTER_KEY=${KEYHIVE_MASTER_KEY:-}
+      - KEYHIVE_ADDR=:8020
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./data:/app/data

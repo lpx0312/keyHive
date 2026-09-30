@@ -1,0 +1,221 @@
+name: Build Binary & Release
+
+# keyHive 二进制发版流水线（结构参考 postgresql-binary/build-binary.yml）。
+# keyHive 为纯 Go（CGO_ENABLED=0）+ go:embed 前端，交叉编译无需分架构 runner：
+#   build-frontend - 构建一次 Vue3 dist（artifact 共享）
+#   build-binary   - 矩阵交叉编译 linux/darwin amd64+arm64、windows amd64
+#   release        - 合并全平台产物 + sha256 → 发到同一 Release tag
+#
+# 触发：手动（输入版本号）或推送 v* tag 自动发版。
+# zone: cn 输入可切换 npm/Go 国内源（runner 在国外，保持 false）。
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（如 1.1.0，发布为 tag v1.1.0）'
+        required: true
+        default: '1.1.0'
+        type: string
+      use_cn_mirror:
+        description: '切换国内源（npm/Go 模块；runner 在国外，保持 false）'
+        required: false
+        default: false
+        type: boolean
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  # ============================================================
+  # Job 1: 构建前端（一次），产物给各平台编译 job 复用
+  # ============================================================
+  build-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build Web Dist
+        run: |
+          if [ "$USE_CN_MIRROR" = "true" ]; then
+            npm config set registry https://registry.npmmirror.com
+          fi
+          cd web
+          npm ci
+          npm run build
+          ls -lh dist/
+        env:
+          USE_CN_MIRROR: ${{ github.event.inputs.use_cn_mirror }}
+
+      - name: Upload Web Dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist/
+          retention-days: 3
+          if-no-files-found: error
+
+  # ============================================================
+  # Job 2: 矩阵交叉编译（同一 runner，Go CGO_ENABLED=0）
+  # ============================================================
+  build-binary:
+    needs: build-frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Resolve Version
+        id: ver
+        run: |
+          # tag 触发用 tag 名，手动触发用输入值；统一输出带 v 的 tag 与不带 v 的版本
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="v${INPUT_VERSION#v}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version || '1.1.0' }}
+
+      - name: Download Web Dist
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+
+      - name: Build (${{ matrix.goos }}-${{ matrix.goarch }})
+        run: |
+          if [ "$USE_CN_MIRROR" = "true" ]; then
+            go env -w GOPROXY=https://goproxy.cn,direct
+          fi
+          mkdir -p build/bin
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -trimpath -ldflags="-s -w" -o build/bin/ ./cmd/keyhive
+          # 版本元数据写入包内（供发布说明展示，不做注入编译）
+          ls -lh build/bin/
+
+          VER="${{ steps.ver.outputs.version }}"
+          OS="${{ matrix.goos }}"; ARCH="${{ matrix.goarch }}"
+          PKG="keyhive-v${VER}-${OS}-${ARCH}"
+          mkdir -p "dist/${PKG}"
+          if [ "$OS" = "windows" ]; then
+            mv build/bin/keyhive.exe "dist/${PKG}/keyhive.exe"
+            (cd dist && zip -r "${PKG}.zip" "${PKG}")
+          else
+            mv build/bin/keyhive "dist/${PKG}/keyhive"
+            (cd dist && tar -czf "${PKG}.tar.gz" "${PKG}")
+          fi
+          ls -lh dist/*.tar.gz dist/*.zip 2>/dev/null || true
+        env:
+          USE_CN_MIRROR: ${{ github.event.inputs.use_cn_mirror }}
+
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyhive-binary-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          retention-days: 3
+          if-no-files-found: error
+
+  # ============================================================
+  # Job 3: 发 Release（全平台产物挂同一 tag）
+  # ============================================================
+  release:
+    needs: build-binary
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve Version
+        id: ver
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="v${INPUT_VERSION#v}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version || '1.1.0' }}
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: keyhive-binary-*
+          merge-multiple: true
+          path: release-assets/
+
+      - name: List Release Assets
+        run: |
+          echo "=== 本次 Release 产物列表 ==="
+          ls -lh release-assets/
+
+      - name: Generate Checksums
+        run: |
+          cd release-assets/
+          sha256sum *.tar.gz *.zip > keyhive-v${{ steps.ver.outputs.version }}.sha256sum.txt
+          cat keyhive-v${{ steps.ver.outputs.version }}.sha256sum.txt
+
+      - name: Create Release and Upload Binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: keyHive v${{ steps.ver.outputs.version }}
+          body: |
+            ## keyHive v${{ steps.ver.outputs.version }}
+
+            自托管密钥管家：字段结构自由 + 每字段手写注释（给 AI 看）+ 敏感字段加密分级供 AI 调用。
+            单二进制（内嵌 Web UI），Docker/裸机均可运行。
+
+            - **平台**: linux amd64/arm64 · darwin amd64/arm64 · windows amd64（CGO_ENABLED=0 纯静态）
+            - **形态**: `keyhive serve`（默认，Web 服务）/ `list·search·get·reveal`（CLI 客户端）/ `mcp`（stdio MCP server）
+
+            ### 快速开始（裸机）
+            ```bash
+            tar -xzf keyhive-v${{ steps.ver.outputs.version }}-linux-amd64.tar.gz -C /usr/local/bin/ --strip-components=2
+            keyhive serve   # http://localhost:8020，初始密码见启动日志
+            ```
+
+            ### 快速开始（Docker）
+            ```bash
+            docker run -d --name keyhive -p 8020:8020 -v ./data:/app/data registry.cn-hangzhou.aliyuncs.com/lpx03/keyhive
+            ```
+
+            完整文档见仓库 README。
+          files: |
+            release-assets/*.tar.gz
+            release-assets/*.zip
+            release-assets/*.sha256sum.txt
+          generate_release_notes: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# vim: set yaml ts=2 sw=2 et:

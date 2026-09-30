@@ -1,0 +1,226 @@
+name: Build Docker Image
+
+permissions:
+  contents: read
+
+# keyHive 应用镜像构建流水线（风格与 xy-dockerfile/golang.yml 一致）。
+# 构建方式：arm64 用原生 ubuntu-24.04-arm runner，不走 QEMU。
+#   - amd64 / arm64 各自只构建本机架构，推单架构 tag（带 -amd64 / -arm64 后缀）
+#   - architecture=all 时，额外跑 merge-manifest 用 buildx imagetools 合并成不带后缀的多架构 tag
+#   - architecture=amd64 / arm64 单架构模式：不加后缀，直接推不带后缀的 tag（保持原语义）
+# 不使用 matrix + runs-on: ${{ matrix.runner }}：实测会触发 startup_failure，故拆成独立 job + 静态 runs-on。
+#
+# 镜像 tag 规则（image_tags 支持逗号分隔多个，如 "1.1.0,latest"）：
+#   <ACR>/<NS>/keyhive:<tag>-amd64 / <tag>-arm64  ← 各架构 job 产出（all 模式）
+#   <ACR>/<NS>/keyhive:<tag>                      ← merge 合并（all 模式）/ 单架构直接产出
+#
+# 需要的仓库配置（与 xy-dockerfile 同名，可复用习惯）：
+#   vars:    ALIYUN_REGISTRY_USER / HUAWEI_REGISTRY_USER / DOCKERHUB_REGISTRY_USER / TENCENT_REGISTRY_USER
+#   secrets: ALIYUN_REGISTRY_PASSWORD / HUAWEI_REGISTRY_PASSWORD / DOCKERHUB_REGISTRY_PASSWORD / TENCENT_REGISTRY_PASSWORD
+#   （只推 ACR 时仅配 ALIYUN_* 两项即可）
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_registry:
+        description: '推送目标仓库（registry地址/命名空间，默认阿里云ACR）'
+        required: true
+        default: 'registry.cn-hangzhou.aliyuncs.com/lpx03'
+        type: choice
+        options:
+          - registry.cn-hangzhou.aliyuncs.com/lpx03
+          - swr.cn-east-4.myhuaweicloud.com/lpx03
+          - docker.io/sktill
+          - ccr.ccs.tencentyun.com/lpx03
+      image_name:
+        description: '镜像名（默认 keyhive）'
+        required: true
+        default: 'keyhive'
+        type: string
+      image_tags:
+        description: '镜像 tag（逗号分隔多个，如 "1.1.0,latest"）'
+        required: true
+        default: 'latest'
+        type: string
+      architecture:
+        description: '目标架构（默认 all=双架构并行）'
+        required: false
+        type: choice
+        options:
+          - all
+          - amd64
+          - arm64
+        default: 'all'
+      use_cn_mirror:
+        description: '构建时切换国内源（npm/Go 模块；runner 在国外，保持 false）'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  build-amd64:
+    if: ${{ github.event.inputs.architecture == 'all' || github.event.inputs.architecture == 'amd64' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build & Push (amd64)
+        timeout-minutes: 25
+        run: |
+          # --- 解析推送目标仓库(target_registry 下拉框) -> REGISTRY/NAME_SPACE/凭据 ---
+          TARGET="${TARGET_REGISTRY:-registry.cn-hangzhou.aliyuncs.com/lpx03}"
+          REGISTRY="${TARGET%%/*}"
+          NAME_SPACE="${TARGET##*/}"
+          case "$REGISTRY" in
+            registry.cn-hangzhou.aliyuncs.com) REGISTRY_USER="${ALIYUN_REGISTRY_USER}"; REGISTRY_PASSWORD="${ALIYUN_REGISTRY_PASSWORD}" ;;
+            swr.cn-east-4.myhuaweicloud.com)   REGISTRY_USER="${HUAWEI_REGISTRY_USER}"; REGISTRY_PASSWORD="${HUAWEI_REGISTRY_PASSWORD}" ;;
+            docker.io)                         REGISTRY_USER="${DOCKERHUB_REGISTRY_USER}"; REGISTRY_PASSWORD="${DOCKERHUB_REGISTRY_PASSWORD}" ;;
+            ccr.ccs.tencentyun.com)            REGISTRY_USER="${TENCENT_REGISTRY_USER}"; REGISTRY_PASSWORD="${TENCENT_REGISTRY_PASSWORD}" ;;
+            *) echo "❌ 未知目标仓库: ${REGISTRY} (可选: ACR/SWR/DockerHub/腾讯云)"; exit 1 ;;
+          esac
+          [ -n "$REGISTRY_USER" ] && [ -n "$REGISTRY_PASSWORD" ] || { echo "❌ 凭据未配置（vars.*_REGISTRY_USER / secrets.*_REGISTRY_PASSWORD）"; exit 1; }
+          REPO="${REGISTRY}/${NAME_SPACE}/${IMAGE_NAME}"
+          echo "=== 推送目标: ${REPO} (user=${REGISTRY_USER}) ==="
+
+          echo "${REGISTRY_PASSWORD}" | docker login "${REGISTRY}" -u "${REGISTRY_USER}" --password-stdin
+          CN_ARGS=""
+          if [ "$USE_CN_MIRROR" = "true" ]; then CN_ARGS="--build-arg USE_CN_MIRROR=1"; fi
+          # all 模式推 -amd64 后缀单架构 tag；单架构模式直接推不带后缀 tag
+          if [ "${ARCHITECTURE}" = "all" ]; then SUFFIX="-amd64"; else SUFFIX=""; fi
+
+          IFS=',' read -ra TAGS <<< "$IMAGE_TAGS"
+          BUILD_ARGS=()
+          for t in "${TAGS[@]}"; do BUILD_ARGS+=(-t "${REPO}:${t}${SUFFIX}"); done
+          echo "=== docker build ${BUILD_ARGS[*]} ${CN_ARGS} ==="
+          docker build ${CN_ARGS} "${BUILD_ARGS[@]}" .
+          for t in "${TAGS[@]}"; do
+            docker push "${REPO}:${t}${SUFFIX}" || { echo "❌ 推送失败: ${REPO}:${t}${SUFFIX}"; exit 1; }
+          done
+          echo "✅ 推送完成 (amd64): ${REPO}:{${IMAGE_TAGS}}${SUFFIX}"
+        env:
+          TARGET_REGISTRY: ${{ github.event.inputs.target_registry }}
+          IMAGE_NAME: ${{ github.event.inputs.image_name || 'keyhive' }}
+          IMAGE_TAGS: ${{ github.event.inputs.image_tags || 'latest' }}
+          ARCHITECTURE: amd64
+          USE_CN_MIRROR: ${{ github.event.inputs.use_cn_mirror }}
+          ALIYUN_REGISTRY_USER: ${{ vars.ALIYUN_REGISTRY_USER }}
+          ALIYUN_REGISTRY_PASSWORD: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+          HUAWEI_REGISTRY_USER: ${{ vars.HUAWEI_REGISTRY_USER }}
+          HUAWEI_REGISTRY_PASSWORD: ${{ secrets.HUAWEI_REGISTRY_PASSWORD }}
+          DOCKERHUB_REGISTRY_USER: ${{ vars.DOCKERHUB_REGISTRY_USER }}
+          DOCKERHUB_REGISTRY_PASSWORD: ${{ secrets.DOCKERHUB_REGISTRY_PASSWORD }}
+          TENCENT_REGISTRY_USER: ${{ vars.TENCENT_REGISTRY_USER }}
+          TENCENT_REGISTRY_PASSWORD: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
+
+  build-arm64:
+    if: ${{ github.event.inputs.architecture == 'all' || github.event.inputs.architecture == 'arm64' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build & Push (arm64)
+        timeout-minutes: 25
+        run: |
+          # --- 解析推送目标仓库(target_registry 下拉框) -> REGISTRY/NAME_SPACE/凭据 ---
+          TARGET="${TARGET_REGISTRY:-registry.cn-hangzhou.aliyuncs.com/lpx03}"
+          REGISTRY="${TARGET%%/*}"
+          NAME_SPACE="${TARGET##*/}"
+          case "$REGISTRY" in
+            registry.cn-hangzhou.aliyuncs.com) REGISTRY_USER="${ALIYUN_REGISTRY_USER}"; REGISTRY_PASSWORD="${ALIYUN_REGISTRY_PASSWORD}" ;;
+            swr.cn-east-4.myhuaweicloud.com)   REGISTRY_USER="${HUAWEI_REGISTRY_USER}"; REGISTRY_PASSWORD="${HUAWEI_REGISTRY_PASSWORD}" ;;
+            docker.io)                         REGISTRY_USER="${DOCKERHUB_REGISTRY_USER}"; REGISTRY_PASSWORD="${DOCKERHUB_REGISTRY_PASSWORD}" ;;
+            ccr.ccs.tencentyun.com)            REGISTRY_USER="${TENCENT_REGISTRY_USER}"; REGISTRY_PASSWORD="${TENCENT_REGISTRY_PASSWORD}" ;;
+            *) echo "❌ 未知目标仓库: ${REGISTRY} (可选: ACR/SWR/DockerHub/腾讯云)"; exit 1 ;;
+          esac
+          [ -n "$REGISTRY_USER" ] && [ -n "$REGISTRY_PASSWORD" ] || { echo "❌ 凭据未配置（vars.*_REGISTRY_USER / secrets.*_REGISTRY_PASSWORD）"; exit 1; }
+          REPO="${REGISTRY}/${NAME_SPACE}/${IMAGE_NAME}"
+          echo "=== 推送目标: ${REPO} (user=${REGISTRY_USER}) ==="
+
+          echo "${REGISTRY_PASSWORD}" | docker login "${REGISTRY}" -u "${REGISTRY_USER}" --password-stdin
+          CN_ARGS=""
+          if [ "$USE_CN_MIRROR" = "true" ]; then CN_ARGS="--build-arg USE_CN_MIRROR=1"; fi
+          if [ "${ARCHITECTURE}" = "all" ]; then SUFFIX="-arm64"; else SUFFIX=""; fi
+
+          IFS=',' read -ra TAGS <<< "$IMAGE_TAGS"
+          BUILD_ARGS=()
+          for t in "${TAGS[@]}"; do BUILD_ARGS+=(-t "${REPO}:${t}${SUFFIX}"); done
+          echo "=== docker build ${BUILD_ARGS[*]} ${CN_ARGS} ==="
+          docker build ${CN_ARGS} "${BUILD_ARGS[@]}" .
+          for t in "${TAGS[@]}"; do
+            docker push "${REPO}:${t}${SUFFIX}" || { echo "❌ 推送失败: ${REPO}:${t}${SUFFIX}"; exit 1; }
+          done
+          echo "✅ 推送完成 (arm64): ${REPO}:{${IMAGE_TAGS}}${SUFFIX}"
+        env:
+          TARGET_REGISTRY: ${{ github.event.inputs.target_registry }}
+          IMAGE_NAME: ${{ github.event.inputs.image_name || 'keyhive' }}
+          IMAGE_TAGS: ${{ github.event.inputs.image_tags || 'latest' }}
+          ARCHITECTURE: arm64
+          USE_CN_MIRROR: ${{ github.event.inputs.use_cn_mirror }}
+          ALIYUN_REGISTRY_USER: ${{ vars.ALIYUN_REGISTRY_USER }}
+          ALIYUN_REGISTRY_PASSWORD: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+          HUAWEI_REGISTRY_USER: ${{ vars.HUAWEI_REGISTRY_USER }}
+          HUAWEI_REGISTRY_PASSWORD: ${{ secrets.HUAWEI_REGISTRY_PASSWORD }}
+          DOCKERHUB_REGISTRY_USER: ${{ vars.DOCKERHUB_REGISTRY_USER }}
+          DOCKERHUB_REGISTRY_PASSWORD: ${{ secrets.DOCKERHUB_REGISTRY_PASSWORD }}
+          TENCENT_REGISTRY_USER: ${{ vars.TENCENT_REGISTRY_USER }}
+          TENCENT_REGISTRY_PASSWORD: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
+
+  merge-manifest:
+    needs: [build-amd64, build-arm64]
+    if: ${{ github.event.inputs.architecture == 'all' || github.event.inputs.architecture == '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Merge Multi-Arch Manifests
+        run: |
+          # --- 解析推送目标仓库(target_registry 下拉框) -> REGISTRY/NAME_SPACE/凭据 ---
+          TARGET="${TARGET_REGISTRY:-registry.cn-hangzhou.aliyuncs.com/lpx03}"
+          REGISTRY="${TARGET%%/*}"
+          NAME_SPACE="${TARGET##*/}"
+          case "$REGISTRY" in
+            registry.cn-hangzhou.aliyuncs.com) REGISTRY_USER="${ALIYUN_REGISTRY_USER}"; REGISTRY_PASSWORD="${ALIYUN_REGISTRY_PASSWORD}" ;;
+            swr.cn-east-4.myhuaweicloud.com)   REGISTRY_USER="${HUAWEI_REGISTRY_USER}"; REGISTRY_PASSWORD="${HUAWEI_REGISTRY_PASSWORD}" ;;
+            docker.io)                         REGISTRY_USER="${DOCKERHUB_REGISTRY_USER}"; REGISTRY_PASSWORD="${DOCKERHUB_REGISTRY_PASSWORD}" ;;
+            ccr.ccs.tencentyun.com)            REGISTRY_USER="${TENCENT_REGISTRY_USER}"; REGISTRY_PASSWORD="${TENCENT_REGISTRY_PASSWORD}" ;;
+            *) echo "❌ 未知目标仓库: ${REGISTRY} (可选: ACR/SWR/DockerHub/腾讯云)"; exit 1 ;;
+          esac
+          REPO="${REGISTRY}/${NAME_SPACE}/${IMAGE_NAME}"
+          echo "=== 合并 manifest -> ${REPO} ==="
+          echo "${REGISTRY_PASSWORD}" | docker login "${REGISTRY}" -u "${REGISTRY_USER}" --password-stdin
+
+          IFS=',' read -ra TAGS <<< "$IMAGE_TAGS"
+          failed=()
+          for t in "${TAGS[@]}"; do
+            echo "============================================"
+            echo "  ${REPO}:${t}-amd64 + ${REPO}:${t}-arm64"
+            echo "  -> ${REPO}:${t}"
+            echo "============================================"
+            if ! docker buildx imagetools create -t "${REPO}:${t}" "${REPO}:${t}-amd64" "${REPO}:${t}-arm64"; then
+              echo "❌ 合并失败: ${t}"; failed+=("${t}")
+            else
+              echo "✅ ${REPO}:${t}"
+            fi
+          done
+          if [ ${#failed[@]} -ne 0 ]; then echo "失败 tag: ${failed[*]}"; exit 1; fi
+          echo "✅ 全部多架构 manifest 合并成功"
+        env:
+          TARGET_REGISTRY: ${{ github.event.inputs.target_registry }}
+          IMAGE_NAME: ${{ github.event.inputs.image_name || 'keyhive' }}
+          IMAGE_TAGS: ${{ github.event.inputs.image_tags || 'latest' }}
+          ALIYUN_REGISTRY_USER: ${{ vars.ALIYUN_REGISTRY_USER }}
+          ALIYUN_REGISTRY_PASSWORD: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+          HUAWEI_REGISTRY_USER: ${{ vars.HUAWEI_REGISTRY_USER }}
+          HUAWEI_REGISTRY_PASSWORD: ${{ secrets.HUAWEI_REGISTRY_PASSWORD }}
+          DOCKERHUB_REGISTRY_USER: ${{ vars.DOCKERHUB_REGISTRY_USER }}
+          DOCKERHUB_REGISTRY_PASSWORD: ${{ secrets.DOCKERHUB_REGISTRY_PASSWORD }}
+          TENCENT_REGISTRY_USER: ${{ vars.TENCENT_REGISTRY_USER }}
+          TENCENT_REGISTRY_PASSWORD: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
+
+# vim: set yaml ts=2 sw=2 et:

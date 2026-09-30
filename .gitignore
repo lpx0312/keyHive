@@ -1,0 +1,19 @@
+# 数据与本地运行产物
+data/
+tmpdata/
+*.log
+cookies.txt
+keyhive
+keyhive.exe
+
+# 前端
+web/node_modules/
+web/dist/assets/
+
+# IDE
+.idea/
+.vscode/
+
+# 会话内部文件与无关产物
+.zcode/
+*.jar
