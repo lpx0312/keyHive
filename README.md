@@ -92,6 +92,7 @@ keyhive get 3                     # 条目详情（遮蔽）
 keyhive reveal 3 password         # 取单字段明文（记审计）
 keyhive totp 5                    # 生成两步验证 6 位动态码（30 秒有效，记审计）
 keyhive add --file entry.json     # 录入条目（admin 登录；密码用 --pass 或 KEYHIVE_ADMIN_PASS 环境变量传入，避免进 shell 历史）
+keyhive edit 3 password=NewP@ss   # 更新条目字段（admin；未提及的敏感字段保留原值；密码轮换后更新库值）
 keyhive list --stale 90           # 只看超 90 天未更新的条目（密码轮换提醒）
 keyhive import --file bitwarden.csv --format bitwarden [--dry-run]  # 从 Bitwarden/Chrome CSV 批量导入
 keyhive export [--masked]         # 全库导出（admin；--masked 输出遮蔽版；明文导出记审计）
@@ -103,7 +104,7 @@ CI 示例（GitHub Actions 中取密码做 docker login）：
 ```yaml
 - run: |
     echo "${{ secrets.KEYHIVE_TOKEN }}" > ~/.keyhive/config.json  # 或用环境变量组装
-    keyhive reveal 3 password | docker login swr.cn-east-3.myhuaweicloud.com -u ci-bot --password-stdin
+    keyhive reveal 3 password | jq -r .value | docker login swr.cn-east-3.myhuaweicloud.com -u ci-bot --password-stdin
 ```
 
 ## MCP 接入（AI 客户端原生工具）
@@ -141,6 +142,8 @@ go test ./...          # 后端测试（crypto/auth/store/aiapi）
 cd web && npm run dev  # 前端开发服（代理 /api 到 :8020）
 ```
 
-## 路线图（未做）
+## 路线图
+
+已全部落地：MCP server、导入导出、密钥轮换、TOTP、轮换提醒、CSV 导入、版本注入。暂缓项：登录防爆破（内网部署暂缓；暴露公网时必做）、会话管理页、CLI delete。
 
 MCP server 子命令（`keyhive mcp` stdio）、导入导出、密钥轮换。
