@@ -170,8 +170,10 @@ const (
 	ActionUserCreate   = "user_create"
 	ActionUserUpdate   = "user_update"
 	ActionUserDelete   = "user_delete"
-	ActionExport       = "export"     // 全库明文导出（admin）
-	ActionKeyRotate    = "key_rotate" // 主密钥轮换（admin）
+	ActionExport       = "export"      // 全库明文导出（admin）
+	ActionKeyRotate    = "key_rotate"  // 主密钥轮换（admin）
+	ActionTOTPGen      = "totp_gen"    // 生成两步验证动态码
+	ActionImport       = "import"      // CSV 批量导入（admin）
 )
 
 // User 登录账号

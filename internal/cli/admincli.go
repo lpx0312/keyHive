@@ -4,7 +4,6 @@ package cli
 
 import (
 	"bytes"
-	"encoding/csv"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -15,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"keyhive/internal/totp"
+	"keyhive/internal/importer"
 )
 
 // adminClient admin 登录换取带会话 cookie 的 client（export/import/rotate-key/add 共用）
@@ -132,17 +131,6 @@ func cmdExport(cfg *Config, args []string) int {
 
 // ---- import（Bitwarden / Chrome CSV）----
 
-// importEntry 解析后的待导入条目
-type importEntry struct {
-	Title       string
-	URL         string
-	Username    string
-	Password    string
-	TOTP        string
-	Notes       string
-	SourceField string // 来源标记
-}
-
 func cmdImport(cfg *Config, args []string) int {
 	fs := flag.NewFlagSet("import", flag.ContinueOnError)
 	file := fs.String("file", "", "CSV 文件路径")
@@ -163,19 +151,9 @@ func cmdImport(cfg *Config, args []string) int {
 		fmt.Fprintln(os.Stderr, "错误: 读取文件失败:", err)
 		return 1
 	}
-	raw = bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF}) // 剥 UTF-8 BOM
-	var entries []importEntry
-	switch strings.ToLower(*format) {
-	case "bitwarden":
-		entries, err = parseBitwardenCSV(raw)
-	case "chrome":
-		entries, err = parseChromeCSV(raw)
-	default:
-		fmt.Fprintln(os.Stderr, "错误: 未知格式（bitwarden | chrome）:", *format)
-		return 2
-	}
+	entries, err := importer.Parse(*format, raw)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "错误: CSV 解析失败:", err)
+		fmt.Fprintln(os.Stderr, "错误:", err)
 		return 1
 	}
 	fmt.Fprintf(os.Stderr, "解析到 %d 条记录\n", len(entries))
@@ -200,7 +178,7 @@ func cmdImport(cfg *Config, args []string) int {
 	}
 	ok, fail := 0, 0
 	for _, e := range entries {
-		body, _ := json.Marshal(entryFromImport(e, *format))
+		body, _ := json.Marshal(importer.ToEntryJSON(e, sourceLabel(*format)))
 		data, code, err := AddEntry(cfg, *user, *pass, body)
 		if err != nil || code != 201 {
 			fail++
@@ -216,103 +194,18 @@ func cmdImport(cfg *Config, args []string) int {
 	return 0
 }
 
+func sourceLabel(format string) string {
+	if strings.EqualFold(format, "bitwarden") {
+		return "Bitwarden"
+	}
+	return "Chrome"
+}
+
 func errOrBody(err error, data []byte) string {
 	if err != nil {
 		return err.Error()
 	}
 	return string(data)
-}
-
-// entryFromImport 映射为 keyHive 条目（字段名与 web_account 模板对齐）
-func entryFromImport(e importEntry, format string) map[string]any {
-	fields := []map[string]any{}
-	add := func(key, desc, val string, secret bool, multiline ...bool) {
-		if strings.TrimSpace(val) == "" {
-			return
-		}
-		t := "text"
-		if len(multiline) > 0 && multiline[0] {
-			t = "multiline"
-		}
-		fields = append(fields, map[string]any{
-			"key": key, "description": desc, "type": t, "is_secret": secret, "value": val,
-		})
-	}
-	add("url", "网址", e.URL, false)
-	add("username", "用户名/邮箱", e.Username, false)
-	add("password", "登录密码", e.Password, true)
-	if e.TOTP != "" {
-		secret := totp.ParseOTAuth(e.TOTP) // Bitwarden 常见 otpauth:// URI，提取纯密钥
-		add("totp_secret", "两步验证 TOTP 密钥（keyhive totp 命令可直接生成动态码）", secret, true)
-	}
-	add("notes", "备注", e.Notes, false, true)
-	return map[string]any{
-		"title":       e.Title,
-		"category":    "web_account",
-		"description": fmt.Sprintf("从 %s CSV 导入 @ %s", map[bool]string{true: "Bitwarden", false: "Chrome"}[format == "bitwarden"], time.Now().Format("2006-01-02")),
-		"ai_visible":  true,
-		"fields":      fields,
-	}
-}
-
-// parseBitwardenCSV 兼容 Bitwarden 标准/加密 JSON 之外的 CSV 导出
-func parseBitwardenCSV(data []byte) ([]importEntry, error) {
-	return parseCSV(data, func(cols map[string]string) (importEntry, bool) {
-		name := cols["name"]
-		if name == "" && cols["login_username"] == "" && cols["login_password"] == "" {
-			return importEntry{}, false
-		}
-		if name == "" {
-			name = cols["login_uri"]
-		}
-		return importEntry{
-			Title: name, URL: cols["login_uri"], Username: cols["login_username"],
-			Password: cols["login_password"], TOTP: cols["login_totp"], Notes: cols["notes"],
-		}, true
-	})
-}
-
-// parseChromeCSV Chrome/Edge 导出的 CSV（name,url,username,password）
-func parseChromeCSV(data []byte) ([]importEntry, error) {
-	return parseCSV(data, func(cols map[string]string) (importEntry, bool) {
-		if cols["name"] == "" && cols["password"] == "" {
-			return importEntry{}, false
-		}
-		return importEntry{
-			Title: cols["name"], URL: cols["url"], Username: cols["username"], Password: cols["password"],
-		}, true
-	})
-}
-
-// parseCSV 通用：表头列名 → 行 map → 过滤映射
-func parseCSV(data []byte, mapRow func(map[string]string) (importEntry, bool)) ([]importEntry, error) {
-	r := csv.NewReader(bytes.NewReader(data))
-	r.FieldsPerRecord = -1 // 各行列数可能不齐
-	r.LazyQuotes = true
-	header, err := r.Read()
-	if err != nil {
-		return nil, fmt.Errorf("读取表头失败: %w", err)
-	}
-	var out []importEntry
-	for {
-		rec, err := r.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("读取行失败: %w", err)
-		}
-		cols := map[string]string{}
-		for i, h := range header {
-			if i < len(rec) {
-				cols[strings.TrimSpace(h)] = rec[i]
-			}
-		}
-		if e, ok := mapRow(cols); ok {
-			out = append(out, e)
-		}
-	}
-	return out, nil
 }
 
 // ---- rotate-key ----

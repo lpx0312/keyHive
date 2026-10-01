@@ -56,6 +56,7 @@ func (s *Server) usernameByID(id int64) string {
 func (s *Server) Routes(r chi.Router) {
 	r.Post("/auth/login", s.login)
 	r.Post("/auth/logout", s.logout)
+	r.Get("/version", s.versionInfo)
 
 	r.Group(func(pr chi.Router) {
 		pr.Use(auth.RequireSession(s.Store.DB))
@@ -71,6 +72,8 @@ func (s *Server) Routes(r chi.Router) {
 		pr.Delete("/entries/{id}", s.deleteEntry)
 		pr.Post("/entries/{id}/save-as-template", s.saveAsTemplate)
 		pr.Get("/categories", s.categories)
+		pr.Post("/entries/{id}/totp", s.genTOTP)
+		pr.Get("/settings/stale-days", s.getStaleDays)
 
 		pr.Get("/templates", s.listTemplates)
 		pr.Post("/templates", s.createTemplate)
@@ -100,6 +103,8 @@ func (s *Server) Routes(r chi.Router) {
 		ar.Get("/audit", s.listAudit)
 		ar.Get("/export", s.exportEntries)
 		ar.Post("/rotate-key", s.rotateKey)
+		ar.Post("/import", s.importCSV)
+		ar.Put("/settings/stale-days", s.putStaleDays)
 		ar.Put("/ai-config", s.handleAIConfig)
 	})
 }

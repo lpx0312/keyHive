@@ -18,6 +18,7 @@
       <div class="head">
         <h3>{{ isCreate ? '新建条目' : '编辑：' + form.title }}</h3>
         <div>
+          <el-button v-if="!isCreate && hasTOTP" @click="showTOTP">🔑 动态码</el-button>
           <el-button v-if="!isCreate" @click="saveAsTemplate">另存为模板</el-button>
           <el-button type="primary" :loading="saving" @click="save">保存</el-button>
           <el-button @click="$router.push('/entries')">返回</el-button>
@@ -73,11 +74,19 @@
           :title="`有 ${missingDesc} 个字段未填写说明：AI 将无法准确理解这些字段的用途`" />
       </el-card>
     </div>
+
+    <!-- 两步验证动态码 -->
+    <el-dialog v-model="totpDlg" title="两步验证动态码" width="340px" @closed="stopTOTPTimer">
+      <div class="totp-code">{{ totpCode }}</div>
+      <el-progress :percentage="totpRemaining / 30 * 100" :show-text="false" :stroke-width="6"
+        :color="totpRemaining <= 5 ? '#f56c6c' : '#409eff'" />
+      <p class="totp-hint">{{ totpRemaining }} 秒后刷新（服务端生成，密钥不出库，已记审计）</p>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
@@ -170,6 +179,42 @@ async function saveAsTemplate() {
   ElMessage.success('已存为模板（字段骨架与注释，不含值）')
 }
 
+// ---- 两步验证动态码（服务端生成，密钥不出库） ----
+const hasTOTP = computed(() => form.value.fields.some(
+  (f) => f.key.toLowerCase().includes('totp') || f.description.includes('TOTP') || f.description.includes('两步验证')))
+const totpDlg = ref(false)
+const totpCode = ref('')
+const totpRemaining = ref(0)
+let totpTimer: number | undefined
+
+async function fetchTOTP() {
+  try {
+    const r = await api(`/entries/${id}/totp`, { method: 'POST', body: JSON.stringify({}) })
+    totpCode.value = r.code
+    totpRemaining.value = r.remaining
+  } catch (e: any) {
+    ElMessage.error(e.message)
+    stopTOTPTimer()
+    totpDlg.value = false
+  }
+}
+
+function showTOTP() {
+  totpDlg.value = true
+  fetchTOTP()
+  stopTOTPTimer()
+  totpTimer = window.setInterval(() => {
+    totpRemaining.value--
+    if (totpRemaining.value <= 0) fetchTOTP() // 到期自动取下一窗口
+  }, 1000)
+}
+
+function stopTOTPTimer() {
+  if (totpTimer) { clearInterval(totpTimer); totpTimer = undefined }
+}
+
+onUnmounted(stopTOTPTimer)
+
 onMounted(load)
 </script>
 
@@ -187,6 +232,8 @@ onMounted(load)
 .c-sec { flex-shrink: 0; margin-right: 0; }
 .desc-warn :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px #e6a23c inset; }
 .hint { margin-left: 10px; color: #94a3b8; font-size: 12px; }
+.totp-code { font-size: 40px; font-weight: 700; letter-spacing: 8px; text-align: center; font-family: monospace; }
+.totp-hint { color: #94a3b8; font-size: 12px; text-align: center; }
 
 /* 移动端：字段卡片（字段名+类型一行，值/说明/操作各占整行） */
 .field-row-m { display: grid; grid-template-columns: 58% 1fr; gap: 6px; border: 1px solid #e4e7ed; border-radius: 8px; padding: 10px; margin-bottom: 10px; background: #fafbfc; }
