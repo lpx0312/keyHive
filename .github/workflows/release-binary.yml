@@ -117,8 +117,7 @@ jobs:
           fi
           mkdir -p build/bin
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
-            go build -trimpath -ldflags="-s -w" -o build/bin/ ./cmd/keyhive
-          # 版本元数据写入包内（供发布说明展示，不做注入编译）
+            go build -trimpath -ldflags="-s -w -X keyhive/internal/version.Version=${{ steps.ver.outputs.tag }}" -o build/bin/ ./cmd/keyhive
           ls -lh build/bin/
 
           VER="${{ steps.ver.outputs.version }}"
