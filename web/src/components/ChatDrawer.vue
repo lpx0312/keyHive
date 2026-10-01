@@ -51,6 +51,7 @@
 import { ref, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, Entry } from '../api'
+import { bumpEntries } from '../store'
 
 interface Msg {
   role: 'user' | 'assistant'
@@ -119,6 +120,7 @@ async function saveDraft(m: Msg) {
       await api('/entries', { method: 'POST', body: JSON.stringify(m.draft) })
     }
     m.done = 'saved'
+    bumpEntries() // 通知条目列表页自动刷新
     ElMessage.success(`${m.draftKind === 'update' ? '已更新' : '已入库'}：${m.draft.title}`)
   } catch (e: any) {
     ElMessage.error(e.message)

@@ -68,11 +68,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, Entry } from '../api'
 import { useIsMobile } from '../ui'
+import { entryVersion } from '../store'
 
 const router = useRouter()
 const isMobile = useIsMobile()
@@ -121,6 +122,9 @@ function daysSince(v: string): number {
   if (!v) return 0
   return Math.floor((Date.now() - new Date(v).getTime()) / 86400000)
 }
+
+// AI 助手在别的组件里确认入库/更新后，这里自动刷新
+watch(entryVersion, () => load())
 
 onMounted(load)
 </script>

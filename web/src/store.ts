@@ -1,4 +1,4 @@
-import { reactive } from 'vue'
+import { reactive, ref } from 'vue'
 import { api } from './api'
 
 // 全局登录态（模块级单例）
@@ -19,4 +19,11 @@ export async function loadMe() {
   } catch {
     /* 401 时 api() 已跳登录 */
   }
+}
+
+// 条目数据版本号：AI 助手等全局组件改动条目后递增，列表页监听自动刷新
+export const entryVersion = ref(0)
+
+export function bumpEntries() {
+  entryVersion.value++
 }
