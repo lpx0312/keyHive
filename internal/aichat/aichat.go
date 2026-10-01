@@ -219,3 +219,62 @@ func truncate(s string, n int) string {
 	}
 	return s[:n] + "..."
 }
+
+// TestResult 连接测试结果
+type TestResult struct {
+	OK        bool   `json:"ok"`
+	Model     string `json:"model"`
+	Reply     string `json:"reply,omitempty"`
+	LatencyMs int64  `json:"latency_ms"`
+	Error     string `json:"error,omitempty"`
+}
+
+// TestConnection 用最小请求验证 LLM 配置连通性（不消耗 tools，max_tokens 限制开销）
+func TestConnection(ctx context.Context, cfg Config) *TestResult {
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = DefaultBaseURL
+	}
+	if cfg.Model == "" {
+		cfg.Model = DefaultModel
+	}
+	res := &TestResult{Model: cfg.Model}
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"model": cfg.Model,
+		"messages": []map[string]string{
+			{"role": "user", "content": "ping，请只回复 pong"},
+		},
+		"max_tokens": 16,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		strings.TrimRight(cfg.BaseURL, "/")+"/chat/completions", bytes.NewReader(reqBody))
+	if err != nil {
+		res.Error = err.Error()
+		return res
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+
+	start := time.Now()
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	res.LatencyMs = time.Since(start).Milliseconds()
+	if err != nil {
+		res.Error = fmt.Sprintf("连接失败: %v", err)
+		return res
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		res.Error = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, truncate(string(data), 200))
+		return res
+	}
+	var out llmResponse
+	if err := json.Unmarshal(data, &out); err != nil || len(out.Choices) == 0 {
+		res.Error = "响应格式异常（非 OpenAI 兼容？）"
+		return res
+	}
+	res.OK = true
+	res.Reply = truncate(strings.TrimSpace(out.Choices[0].Message.Content), 60)
+	return res
+}

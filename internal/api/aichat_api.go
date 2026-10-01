@@ -165,3 +165,37 @@ func boolStr(b bool) string {
 	}
 	return "false"
 }
+
+// handleAIConfigTest 测试 LLM 连通性：优先用表单当前值；Key 为空/遮蔽时回退已保存值
+func (s *Server) handleAIConfigTest(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		BaseURL string `json:"base_url"`
+		APIKey  string `json:"api_key"`
+		Model   string `json:"model"`
+	}
+	if err := readBody(r, &req); err != nil {
+		writeErr(w, 400, "请求格式错误")
+		return
+	}
+	apiKey := strings.TrimSpace(req.APIKey)
+	if apiKey == "" || strings.HasPrefix(apiKey, "****") {
+		keyEnc := s.getSetting(settingLLMAPIKey)
+		if keyEnc == "" {
+			writeJSON(w, 200, map[string]any{"ok": false,
+				"error": "未填写 API Key，且系统里也没有已保存的 Key"})
+			return
+		}
+		dec, err := s.Store.Cipher.Decrypt(keyEnc)
+		if err != nil {
+			writeJSON(w, 500, map[string]any{"ok": false, "error": "已保存 Key 解密失败"})
+			return
+		}
+		apiKey = dec
+	}
+	cfg := aichat.Config{
+		BaseURL: orDefault(strings.TrimSpace(req.BaseURL), orDefault(s.getSetting(settingLLMBaseURL), aichat.DefaultBaseURL)),
+		APIKey:  apiKey,
+		Model:   orDefault(strings.TrimSpace(req.Model), orDefault(s.getSetting(settingLLMModel), aichat.DefaultModel)),
+	}
+	writeJSON(w, 200, aichat.TestConnection(r.Context(), cfg))
+}

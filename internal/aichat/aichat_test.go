@@ -152,3 +152,34 @@ func TestHistoryCarried(t *testing.T) {
 		t.Fatalf("历史未携带: %d 条", len(captured.Messages))
 	}
 }
+
+func TestTestConnection(t *testing.T) {
+	// 成功路径
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]any{"content": "pong"}}},
+		})
+	}))
+	defer ts.Close()
+	res := TestConnection(context.Background(), Config{BaseURL: ts.URL, APIKey: "k", Model: "m"})
+	if !res.OK || res.Reply != "pong" || res.LatencyMs < 0 {
+		t.Fatalf("成功路径错误: %+v", res)
+	}
+
+	// 401 路径
+	ts2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(401)
+		w.Write([]byte(`{"error":{"message":"invalid key"}}`))
+	}))
+	defer ts2.Close()
+	res2 := TestConnection(context.Background(), Config{BaseURL: ts2.URL, APIKey: "bad"})
+	if res2.OK || !strings.Contains(res2.Error, "invalid key") {
+		t.Fatalf("401 应失败: %+v", res2)
+	}
+
+	// 连接失败路径
+	res3 := TestConnection(context.Background(), Config{BaseURL: "http://127.0.0.1:1", APIKey: "k"})
+	if res3.OK || !strings.Contains(res3.Error, "连接失败") {
+		t.Fatalf("不可达应失败: %+v", res3)
+	}
+}

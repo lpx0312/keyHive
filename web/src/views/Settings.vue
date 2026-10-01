@@ -35,6 +35,16 @@
           <el-input v-model="aiCfg.model" placeholder="如 glm-4.6" />
         </el-form-item>
         <el-button type="primary" :loading="savingAI" @click="saveAI">保存配置</el-button>
+        <el-button :loading="testing" @click="testAI">测试连接</el-button>
+        <el-alert v-if="testResult" :type="testResult.ok ? 'success' : 'error'" :closable="true"
+          style="margin-top: 10px" @close="testResult = null">
+          <template #title>
+            <span v-if="testResult.ok">
+              ✅ 连接成功（模型 {{ testResult.model }}，耗时 {{ testResult.latency_ms }}ms，回复：{{ testResult.reply || '-' }}）
+            </span>
+            <span v-else>❌ {{ testResult.error }}</span>
+          </template>
+        </el-alert>
       </el-form>
       <p class="tip">Key 用主密钥加密存储。聊天解析时，你输入的内容（含密码）会发送到该 LLM 服务商；高敏凭据建议仍用表单录入。</p>
     </el-card>
@@ -64,7 +74,25 @@ async function change() {
 // ---- AI 录入助手配置 ----
 const aiCfg = ref({ base_url: '', api_key: '', model: '', configured: 'false' })
 const savingAI = ref(false)
+const testing = ref(false)
+const testResult = ref<{ ok: boolean; model?: string; latency_ms?: number; reply?: string; error?: string } | null>(null)
 const tail = computed(() => aiCfg.value.api_key.slice(-4))
+
+// 测试连接：用表单当前值（Key 留空/遮蔽时后端自动回退已保存值），无需先保存
+async function testAI() {
+  testing.value = true
+  testResult.value = null
+  try {
+    testResult.value = await api('/ai-config/test', {
+      method: 'POST',
+      body: JSON.stringify(aiCfg.value),
+    })
+  } catch (e: any) {
+    testResult.value = { ok: false, error: e.message }
+  } finally {
+    testing.value = false
+  }
+}
 
 async function loadAI() {
   aiCfg.value = await api('/ai-config')
