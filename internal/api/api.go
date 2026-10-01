@@ -84,6 +84,7 @@ func (s *Server) Routes(r chi.Router) {
 		pr.Get("/ai-config", s.handleAIConfig)
 		pr.Post("/ai-config/test", s.handleAIConfigTest)
 		pr.Post("/ai-chat", s.handleAIChat)
+		pr.Post("/ai-chat/stream", s.handleAIChatStream)
 	})
 
 	// 管理员：用户管理、AI 令牌、审计日志

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -180,6 +182,101 @@ func orDefault(v, def string) string {
 		return def
 	}
 	return v
+}
+
+// handleAIChatStream 流式对话：SSE 推送 status/reply_delta/draft/done 事件
+func (s *Server) handleAIChatStream(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Messages []aichat.ChatMessage `json:"messages"`
+		Text     string               `json:"text"`
+	}
+	if err := readBody(r, &req); err != nil || strings.TrimSpace(req.Text) == "" {
+		writeErr(w, 400, "请求格式错误：需要 text 字段")
+		return
+	}
+	if len(req.Messages) > 40 {
+		req.Messages = req.Messages[len(req.Messages)-40:]
+	}
+
+	keyEnc := s.getSetting(settingLLMAPIKey)
+	if keyEnc == "" {
+		writeErr(w, 400, "AI 未配置：请先在「设置 → AI 配置」填写 API Key")
+		return
+	}
+	apiKey, err := s.Store.Cipher.Decrypt(keyEnc)
+	if err != nil {
+		writeErr(w, 500, "API Key 解密失败（主密钥变更？）")
+		return
+	}
+	cfg := aichat.Config{
+		BaseURL: orDefault(s.getSetting(settingLLMBaseURL), aichat.DefaultBaseURL),
+		APIKey:  apiKey,
+		Model:   orDefault(s.getSetting(settingLLMModel), aichat.DefaultModel),
+	}
+
+	categories := []string{}
+	if tpls, err := s.Store.ListTemplates(); err == nil {
+		seen := map[string]bool{}
+		for _, t := range tpls {
+			if t.Category != "blank" && !seen[t.Category] {
+				seen[t.Category] = true
+				categories = append(categories, t.Category)
+			}
+		}
+	}
+
+	cb := aichat.ToolCallbacks{
+		SearchEntries: func(query string) ([]model.Entry, error) {
+			list, err := s.Store.ListEntries(query, "")
+			if err != nil {
+				return nil, err
+			}
+			out := make([]model.Entry, 0, len(list))
+			for i := range list {
+				if !list[i].AIVisible {
+					continue
+				}
+				list[i].MaskSecrets()
+				out = append(out, list[i])
+			}
+			return out, nil
+		},
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, 500, "当前连接不支持流式输出")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	sendEvent := func(ev aichat.StreamEvent) error {
+		data, _ := json.Marshal(ev)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+		return nil
+	}
+
+	resp, err := aichat.ChatStream(r.Context(), cfg, aichat.SystemPrompt(categories), req.Messages, req.Text, cb, sendEvent)
+	if err != nil {
+		sendEvent(aichat.StreamEvent{Type: "error", Text: err.Error()})
+		return
+	}
+	// 草稿以独立事件补发（前端渲染确认卡片）；随后 done 收尾
+	if resp.Draft != nil {
+		sendEvent(aichat.StreamEvent{Type: "draft", Text: resp.Reply, Draft: resp.Draft,
+			DraftKind: resp.DraftKind, DraftEntryID: resp.DraftEntryID})
+		uid, _ := auth.UserID(r.Context())
+		detail := `{"kind":"` + resp.DraftKind + `","title":"` + resp.Draft.Title + `","category":"` + resp.Draft.Category + `"`
+		if resp.DraftEntryID > 0 {
+			detail += `,"entry_id":` + fmtInt(resp.DraftEntryID)
+		}
+		detail += "}"
+		audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionAIChatDraft, nil, detail, clientIP(r))
+	}
+	sendEvent(aichat.StreamEvent{Type: "done", Text: resp.Reply})
 }
 
 func boolStr(b bool) string {
