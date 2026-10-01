@@ -90,6 +90,7 @@ keyhive list [--category mysql]   # 列出条目（遮蔽，含注释）
 keyhive search "SWR"              # 搜索（中文/英文均可）
 keyhive get 3                     # 条目详情（遮蔽）
 keyhive reveal 3 password         # 取单字段明文（记审计）
+keyhive add --file entry.json     # 录入条目（admin 登录；密码用 --pass 或 KEYHIVE_ADMIN_PASS 环境变量传入，避免进 shell 历史）
 ```
 
 CI 示例（GitHub Actions 中取密码做 docker login）：

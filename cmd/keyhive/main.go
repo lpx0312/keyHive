@@ -30,7 +30,7 @@ func main() {
 		switch os.Args[1] {
 		case "serve":
 			// 继续启动服务
-		case "list", "search", "get", "reveal", "status", "help", "-h", "--help":
+		case "list", "search", "get", "reveal", "status", "add", "help", "-h", "--help":
 			os.Exit(cli.Run(os.Args[1:]))
 		case "mcp":
 			os.Exit(mcpserver.Run())

@@ -5,9 +5,11 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -111,6 +113,40 @@ func RevealField(cfg *Config, id, field string) ([]byte, int, error) {
 	return apiCall(cfg, cfg.TokenReveal, http.MethodPost, "/entries/"+url.PathEscape(id)+"/reveal", body)
 }
 
+// AddEntry 人用通道录入：admin 登录换取会话 cookie 后创建条目（AI 令牌保持只读）
+func AddEntry(cfg *Config, user, pass string, entryJSON []byte) ([]byte, int, error) {
+	base := cfg.BaseURL
+	if base == "" {
+		base = defaultBaseURL
+	}
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Timeout: 15 * time.Second, Jar: jar}
+
+	loginBody, _ := json.Marshal(map[string]string{"username": user, "password": pass})
+	loginResp, err := client.Post(base+"/api/v1/auth/login", "application/json", bytes.NewReader(loginBody))
+	if err != nil {
+		return nil, 0, &ErrServiceDown{Base: base}
+	}
+	lb, _ := io.ReadAll(loginResp.Body)
+	loginResp.Body.Close()
+	if loginResp.StatusCode != 200 {
+		return lb, loginResp.StatusCode, fmt.Errorf("登录失败（HTTP %d）", loginResp.StatusCode)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, base+"/api/v1/entries", bytes.NewReader(entryJSON))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, &ErrServiceDown{Base: base}
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	return data, resp.StatusCode, nil
+}
+
 // tokenHint 令牌未配置时的指引
 func tokenHint(kind string) string {
 	return fmt.Sprintf("令牌未配置（%s 中 %s 为空）。请到 keyHive Web UI「AI 令牌」页创建令牌（勾选 read/search/reveal），填入 %s",
@@ -185,6 +221,8 @@ func Run(args []string) int {
 		printJSON(data)
 		fmt.Fprintln(os.Stderr, "⚠️  已取明文并记录审计；不要写入文件/git/对话正文")
 		return 0
+	case "add":
+		return cmdAdd(cfg, rest)
 	default:
 		usage()
 		return 2
@@ -246,6 +284,53 @@ func cmdStatus(cfg *Config) int {
 	return 1
 }
 
+func cmdAdd(cfg *Config, args []string) int {
+	fs := flag.NewFlagSet("add", flag.ContinueOnError)
+	user := fs.String("user", "admin", "管理员用户名")
+	pass := fs.String("pass", "", "管理员密码（推荐改用环境变量 KEYHIVE_ADMIN_PASS，避免进 shell 历史）")
+	jsonFile := fs.String("file", "", "条目 JSON 文件路径；留空则读 stdin")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *pass == "" {
+		*pass = strings.TrimSpace(os.Getenv("KEYHIVE_ADMIN_PASS"))
+	}
+	if *pass == "" {
+		fmt.Fprintln(os.Stderr, "错误: 未提供管理员密码（--pass 或环境变量 KEYHIVE_ADMIN_PASS）")
+		return 1
+	}
+	var entryJSON []byte
+	var err error
+	if *jsonFile != "" {
+		entryJSON, err = os.ReadFile(*jsonFile)
+	} else {
+		entryJSON, err = io.ReadAll(os.Stdin)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "错误: 读取条目 JSON 失败:", err)
+		return 1
+	}
+	if !json.Valid(entryJSON) {
+		fmt.Fprintln(os.Stderr, "错误: 条目 JSON 格式无效")
+		return 2
+	}
+	data, code, err := AddEntry(cfg, *user, *pass, entryJSON)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "错误:", err)
+		if sd, ok := err.(*ErrServiceDown); ok {
+			fmt.Fprintln(os.Stderr, sd.hint())
+		}
+		return 1
+	}
+	if code != 201 {
+		os.Stderr.Write(append(data, '\n'))
+		return 1
+	}
+	printJSON(data)
+	fmt.Fprintln(os.Stderr, "✅ 条目已录入（敏感字段已加密存储）")
+	return 0
+}
+
 func pick(b bool, t, f string) string {
 	if b {
 		return t
@@ -263,6 +348,7 @@ func usage() {
   keyhive search <关键词>           搜索
   keyhive get <id>                  条目详情（遮蔽）
   keyhive reveal <id> <字段名>      取单字段明文（记审计）
+  keyhive add --file <条目.json>   录入条目（admin 登录，--pass 或 KEYHIVE_ADMIN_PASS）
   keyhive mcp                       以 stdio MCP server 运行（供 AI 客户端接入）
 
 配置: ~/.keyhive/config.json（KEYHIVE_CONFIG 环境变量可覆盖）`)

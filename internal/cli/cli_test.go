@@ -87,3 +87,51 @@ func TestRevealBody(t *testing.T) {
 		t.Fatalf("body 错误: %v", body)
 	}
 }
+
+func TestAddEntryLoginAndCreate(t *testing.T) {
+	var gotCookie bool
+	var gotBody map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			var creds map[string]string
+			json.NewDecoder(r.Body).Decode(&creds)
+			if creds["username"] == "admin" && creds["password"] == "pw" {
+				http.SetCookie(w, &http.Cookie{Name: "keyhive_session", Value: "s1", Path: "/"})
+				w.WriteHeader(200)
+				w.Write([]byte(`{}`))
+				return
+			}
+			w.WriteHeader(401)
+			w.Write([]byte(`{"error":"用户名或密码错误"}`))
+		case "/api/v1/entries":
+			c, err := r.Cookie("keyhive_session")
+			gotCookie = err == nil && c.Value == "s1"
+			json.NewDecoder(r.Body).Decode(&gotBody)
+			w.WriteHeader(201)
+			w.Write([]byte(`{"id":9}`))
+		default:
+			t.Errorf("意外请求: %s", r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	cfg := &Config{BaseURL: ts.URL}
+	entry := []byte(`{"title":"ACR","fields":[{"key":"password","is_secret":true,"value":"x"}]}`)
+	data, code, err := AddEntry(cfg, "admin", "pw", entry)
+	if err != nil || code != 201 {
+		t.Fatalf("录入失败: %d %v %s", code, err, data)
+	}
+	if !gotCookie {
+		t.Fatal("创建请求未携带登录会话 cookie")
+	}
+	if gotBody["title"] != "ACR" {
+		t.Fatalf("条目 body 错误: %v", gotBody)
+	}
+
+	// 错误密码 → 登录失败错误
+	_, code, err = AddEntry(cfg, "admin", "bad", entry)
+	if err == nil || code == 0 {
+		t.Fatal("错误密码应报登录失败")
+	}
+}
