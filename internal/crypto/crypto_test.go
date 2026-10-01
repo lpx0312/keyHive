@@ -79,24 +79,27 @@ func TestLoadMasterKeyAutoGenerate(t *testing.T) {
 	t.Setenv("KEYHIVE_KEYFILE", "")
 	dir := t.TempDir()
 
-	k1, src1, err := LoadMasterKey(dir)
+	k1, err := LoadMasterKey(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "master.key")); err != nil {
 		t.Fatal("应自动生成 master.key")
 	}
+	if k1.FromEnv || k1.Path == "" {
+		t.Fatalf("应为文件来源: %+v", k1)
+	}
 	// 第二次加载应读到同一密钥
-	k2, _, err := LoadMasterKey(dir)
+	k2, err := LoadMasterKey(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := range k1 {
-		if k1[i] != k2[i] {
+	for i := range k1.Key {
+		if k1.Key[i] != k2.Key[i] {
 			t.Fatal("两次加载的密钥应一致")
 		}
 	}
-	if src1 == "" {
+	if k1.Desc == "" {
 		t.Fatal("应返回密钥来源描述")
 	}
 }
@@ -104,11 +107,22 @@ func TestLoadMasterKeyAutoGenerate(t *testing.T) {
 func TestLoadMasterKeyEnvPriority(t *testing.T) {
 	t.Setenv("KEYHIVE_MASTER_KEY", "from-env")
 	t.Setenv("KEYHIVE_KEYFILE", "")
-	_, src, err := LoadMasterKey(t.TempDir())
+	ks, err := LoadMasterKey(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if src != "KEYHIVE_MASTER_KEY 环境变量" {
-		t.Fatalf("环境变量应优先: %s", src)
+	if !ks.FromEnv || ks.Path != "" {
+		t.Fatalf("环境变量应优先且无文件路径: %+v", ks)
+	}
+	if ks.Desc != "KEYHIVE_MASTER_KEY 环境变量" {
+		t.Fatalf("来源描述不符: %s", ks.Desc)
+	}
+}
+
+func TestDeriveKeyTextStable(t *testing.T) {
+	a := DeriveKeyText("same-input")
+	b := DeriveKeyText("same-input")
+	if len(a) != 32 || string(a) != string(b) {
+		t.Fatal("派生应稳定且为 32 字节")
 	}
 }

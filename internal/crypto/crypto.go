@@ -86,36 +86,49 @@ func (c *Cipher) VerifyKeyCheck(stored string) bool {
 	return err == nil && plain == keyCheckPlain
 }
 
+// KeySource 主密钥加载结果（rotate-key 需要知道密钥来源以决定持久化方式）
+type KeySource struct {
+	Key     []byte
+	FromEnv bool   // true=KEYHIVE_MASTER_KEY 环境变量（服务无法代写）
+	Path    string // 密钥文件路径（FromEnv=false 时有效）
+	Desc    string // 人类可读来源描述
+}
+
 // LoadMasterKey 按优先级加载主密钥：
 // 1. KEYHIVE_MASTER_KEY 环境变量（hex/base64/任意口令，统一 SHA-256 派生 32 字节）
 // 2. KEYHIVE_KEYFILE 指定的密钥文件
 // 3. data/master.key：不存在则自动生成并保存（权限 0600），存在则读取
-// 返回 (key, source描述, error)
-func LoadMasterKey(dataDir string) ([]byte, string, error) {
+func LoadMasterKey(dataDir string) (*KeySource, error) {
 	if env := strings.TrimSpace(os.Getenv("KEYHIVE_MASTER_KEY")); env != "" {
-		return deriveKey(env), "KEYHIVE_MASTER_KEY 环境变量", nil
+		return &KeySource{Key: deriveKey(env), FromEnv: true, Desc: "KEYHIVE_MASTER_KEY 环境变量"}, nil
 	}
 	if f := strings.TrimSpace(os.Getenv("KEYHIVE_KEYFILE")); f != "" {
 		key, err := readKeyFile(f)
-		return key, "密钥文件 " + f, err
+		if err != nil {
+			return nil, err
+		}
+		return &KeySource{Key: key, Path: f, Desc: "密钥文件 " + f}, nil
 	}
 	path := filepath.Join(dataDir, "master.key")
 	if _, err := os.Stat(path); err == nil {
 		key, err := readKeyFile(path)
-		return key, "密钥文件 " + path, err
+		if err != nil {
+			return nil, err
+		}
+		return &KeySource{Key: key, Path: path, Desc: "密钥文件 " + path}, nil
 	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	key := base64.StdEncoding.EncodeToString(raw)
+	keyText := base64.StdEncoding.EncodeToString(raw)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	if err := os.WriteFile(path, []byte(key+"\n"), 0o600); err != nil {
-		return nil, "", fmt.Errorf("写入主密钥文件失败: %w", err)
+	if err := os.WriteFile(path, []byte(keyText+"\n"), 0o600); err != nil {
+		return nil, fmt.Errorf("写入主密钥文件失败: %w", err)
 	}
-	return deriveKey(key), "新生成的密钥文件 " + path, nil
+	return &KeySource{Key: deriveKey(keyText), Path: path, Desc: "新生成的密钥文件 " + path}, nil
 }
 
 func readKeyFile(path string) ([]byte, error) {
@@ -131,3 +144,6 @@ func deriveKey(s string) []byte {
 	h := sha256.Sum256([]byte(s))
 	return h[:]
 }
+
+// DeriveKeyText 导出版 deriveKey（rotate-key 生成新密钥时保持同源派生）
+func DeriveKeyText(s string) []byte { return deriveKey(s) }

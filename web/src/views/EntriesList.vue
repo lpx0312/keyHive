@@ -19,6 +19,7 @@
         <div class="card-meta">
           <el-tag size="small">{{ row.category }}</el-tag>
           <span class="card-fields">{{ row.fields.length }} 字段<template v-if="secretCount(row)"> · 🔒{{ secretCount(row) }}</template></span>
+          <span v-if="daysSince(row.updated_at) > 90" class="stale">⚠️ {{ daysSince(row.updated_at) }} 天未更新</span>
         </div>
         <div v-if="row.description" class="card-desc">{{ row.description }}</div>
         <div class="card-actions">
@@ -47,7 +48,15 @@
           {{ row.fields.length }} 个<el-tooltip content="含敏感字段数"><span v-if="secretCount(row)" class="sec">（🔒{{ secretCount(row) }}）</span></el-tooltip>
         </template>
       </el-table-column>
-      <el-table-column prop="updated_at" label="更新时间" width="170" :formatter="fmtTime" />
+      <el-table-column prop="updated_at" label="更新时间" width="170">
+        <template #default="{ row }">
+          <el-tooltip v-if="daysSince(row.updated_at) > 90" placement="top"
+            :content="`已 ${daysSince(row.updated_at)} 天未更新，建议轮换密码`">
+            <span class="stale">{{ fmtTime(null, null, row.updated_at) }} ⚠️</span>
+          </el-tooltip>
+          <span v-else>{{ fmtTime(null, null, row.updated_at) }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="130" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click.stop="open(row)">编辑</el-button>
@@ -107,12 +116,19 @@ function fmtTime(_r: any, _c: any, v: string) {
   return v ? new Date(v).toLocaleString('zh-CN') : ''
 }
 
+// 距上次更新天数（超 90 天视为该轮换密码）
+function daysSince(v: string): number {
+  if (!v) return 0
+  return Math.floor((Date.now() - new Date(v).getTime()) / 86400000)
+}
+
 onMounted(load)
 </script>
 
 <style scoped>
 .toolbar { display: flex; gap: 12px; margin-bottom: 16px; }
 .sec { color: #e6a23c; font-size: 12px; }
+.stale { color: #e6a23c; cursor: help; }
 :deep(.el-table__row) { cursor: pointer; }
 
 /* 移动端卡片 */

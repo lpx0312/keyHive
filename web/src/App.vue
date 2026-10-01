@@ -46,6 +46,7 @@
       <div class="logout"><span class="who">{{ me.username }}{{ me.isAdmin ? '（管理员）' : '' }}</span><span class="act" @click="logout">退出登录</span></div>
     </el-aside>
     <el-main class="main"><router-view /></el-main>
+    <ChatDrawer />
   </el-container>
   <router-view v-else />
 </template>
@@ -56,6 +57,7 @@ import { Key, Files, Document, Setting, Menu, User } from '@element-plus/icons-v
 import { api } from './api'
 import { useIsMobile } from './ui'
 import { me, loadMe } from './store'
+import ChatDrawer from './components/ChatDrawer.vue'
 
 const isMobile = useIsMobile()
 const drawer = ref(false)

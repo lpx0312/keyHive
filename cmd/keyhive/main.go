@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -21,17 +22,21 @@ import (
 	kdb "keyhive/internal/db"
 	"keyhive/internal/mcpserver"
 	"keyhive/internal/store"
+	"keyhive/internal/version"
 	"keyhive/web"
 )
 
 func main() {
-	// 子命令：无参数或 serve 启动服务；list/search/get/reveal/status 为客户端；mcp 为 stdio MCP server
+	// 子命令：无参数或 serve 启动服务；list/.../rotate-key 为客户端；mcp 为 stdio MCP server
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "serve":
 			// 继续启动服务
-		case "list", "search", "get", "reveal", "status", "add", "help", "-h", "--help":
+		case "list", "search", "get", "reveal", "status", "add", "totp", "export", "import", "rotate-key", "help", "-h", "--help":
 			os.Exit(cli.Run(os.Args[1:]))
+		case "version", "-v", "--version":
+			fmt.Println(version.String())
+			return
 		case "mcp":
 			os.Exit(mcpserver.Run())
 		default:
@@ -46,15 +51,15 @@ func runServe() {
 	dataDir := envOr("KEYHIVE_DATA", "./data")
 
 	// 主密钥与库分离；库内 settings.key_check 用于校验二者匹配
-	masterKey, keySrc, err := crypto.LoadMasterKey(dataDir)
+	keySrc, err := crypto.LoadMasterKey(dataDir)
 	if err != nil {
 		log.Fatalf("加载主密钥失败: %v", err)
 	}
-	cipherBox, err := crypto.New(masterKey)
+	cipherBox, err := crypto.New(keySrc.Key)
 	if err != nil {
 		log.Fatalf("初始化加密失败: %v", err)
 	}
-	log.Printf("主密钥来源: %s", keySrc)
+	log.Printf("keyHive %s | 主密钥来源: %s", version.String(), keySrc.Desc)
 
 	database, err := kdb.Open(dataDir + "/keyhive.db")
 	if err != nil {
@@ -65,7 +70,13 @@ func runServe() {
 		log.Fatalf("%v", err)
 	}
 
-	st := &store.Store{DB: database, Cipher: cipherBox}
+	st := &store.Store{
+		DB:          database,
+		Cipher:      cipherBox,
+		DataDir:     dataDir,
+		KeyFilePath: keySrc.Path,
+		KeyFromEnv:  keySrc.FromEnv,
+	}
 	human := &api.Server{Store: st}
 	ai := &aiapi.Server{Store: st}
 

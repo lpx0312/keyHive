@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -75,6 +76,10 @@ func (s *Server) Routes(r chi.Router) {
 		pr.Post("/templates", s.createTemplate)
 		pr.Put("/templates/{id}", s.updateTemplate)
 		pr.Delete("/templates/{id}", s.deleteTemplate)
+
+		// AI 录入助手：聊天对所有登录用户开放，LLM 配置仅管理员
+		pr.Get("/ai-config", s.handleAIConfig)
+		pr.Post("/ai-chat", s.handleAIChat)
 	})
 
 	// 管理员：用户管理、AI 令牌、审计日志
@@ -92,7 +97,23 @@ func (s *Server) Routes(r chi.Router) {
 		ar.Delete("/tokens/{id}", s.revokeToken)
 
 		ar.Get("/audit", s.listAudit)
+		ar.Get("/export", s.exportEntries)
+		ar.Post("/rotate-key", s.rotateKey)
+		ar.Put("/ai-config", s.handleAIConfig)
 	})
+}
+
+// exportEntries 全库明文导出（admin，每次记审计）
+func (s *Server) exportEntries(w http.ResponseWriter, r *http.Request) {
+	list, err := s.Store.ListEntries("", "")
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	uid, uname := s.actor(r)
+	audit.Log(s.Store.DB, "user", uid, uname, model.ActionExport, nil,
+		fmt.Sprintf(`{"count":%d}`, len(list)), clientIP(r))
+	writeJSON(w, 200, list)
 }
 
 // ---- auth ----

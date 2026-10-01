@@ -165,9 +165,13 @@ const (
 	ActionTemplateSave = "template_save"
 	ActionTemplateDel  = "template_delete"
 	ActionPassword     = "password_change"
+	ActionAIChatDraft  = "ai_chat_draft"  // AI 助手生成条目草稿
+	ActionAIChatConfig = "ai_chat_config" // AI 助手 LLM 配置变更
 	ActionUserCreate   = "user_create"
 	ActionUserUpdate   = "user_update"
 	ActionUserDelete   = "user_delete"
+	ActionExport       = "export"     // 全库明文导出（admin）
+	ActionKeyRotate    = "key_rotate" // 主密钥轮换（admin）
 )
 
 // User 登录账号

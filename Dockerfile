@@ -13,6 +13,7 @@ RUN npm run build
 # ---- 后端构建 ----
 FROM golang:1.26-alpine AS build
 ARG USE_CN_MIRROR=0
+ARG VERSION=dev
 WORKDIR /src
 ENV CGO_ENABLED=0 GOFLAGS=-trimpath
 RUN if [ "$USE_CN_MIRROR" = "1" ]; then go env -w GOPROXY=https://goproxy.cn,direct; fi
@@ -20,7 +21,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web /src/web/dist ./web/dist
-RUN go build -ldflags="-s -w" -o /out/keyhive ./cmd/keyhive
+RUN go build -ldflags="-s -w -X keyhive/internal/version.Version=${VERSION}" -o /out/keyhive ./cmd/keyhive
 
 # ---- 运行镜像 ----
 FROM alpine:3.21

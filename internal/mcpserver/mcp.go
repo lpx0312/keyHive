@@ -12,13 +12,14 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"keyhive/internal/cli"
+	"keyhive/internal/version"
 )
 
 const discipline = "纪律：先用遮蔽信息（字段名+description 注释）判断，能不取明文就不取；明文只注入执行环境，绝不写入文件/git/对话正文；每次 reveal 均记审计。"
 
 // Run 启动 stdio MCP server，返回进程退出码
 func Run() int {
-	s := server.NewMCPServer("keyhive", "1.1.0",
+	s := server.NewMCPServer("keyhive", version.Version,
 		server.WithToolCapabilities(false),
 		server.WithInstructions("keyHive 密钥管家：先 kh_list/kh_search 看有什么（敏感值遮蔽、注释完整），确需明文再 kh_reveal。" + discipline),
 	)

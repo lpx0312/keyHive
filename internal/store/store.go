@@ -6,27 +6,47 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"keyhive/internal/crypto"
 	"keyhive/internal/model"
 )
 
-// Store 条目/模板存取：负责 fields JSON 与敏感字段加解密的衔接
+// Store 条目/模板存取：负责 fields JSON 与敏感字段加解密的衔接。
+// rotate-key 会并发替换 Cipher，故以 RWMutex 保护；DataDir/KeyFilePath/KeyFromEnv
+// 供密钥轮换时决定新密钥的持久化位置。
 type Store struct {
-	DB     *sql.DB
-	Cipher *crypto.Cipher
+	DB          *sql.DB
+	Cipher      *crypto.Cipher
+	DataDir     string
+	KeyFilePath string
+	KeyFromEnv  bool
+
+	mu sync.RWMutex
+}
+
+// cipher 并发安全取当前密钥
+func (s *Store) cipher() *crypto.Cipher {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Cipher
 }
 
 func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // encryptFields 敏感字段值 → 密文后序列化
 func (s *Store) encryptFields(fields []model.Field) (string, error) {
+	return encryptFieldsWith(s.cipher(), fields)
+}
+
+// encryptFieldsWith 用指定密钥加密（rotate 预计算新密文时使用）
+func encryptFieldsWith(c *crypto.Cipher, fields []model.Field) (string, error) {
 	out := make([]model.Field, len(fields))
 	copy(out, fields)
 	for i := range out {
 		if out[i].IsSecret && out[i].Value != "" && !crypto.IsEncrypted(out[i].Value) {
-			enc, err := s.Cipher.Encrypt(out[i].Value)
+			enc, err := c.Encrypt(out[i].Value)
 			if err != nil {
 				return "", err
 			}
@@ -39,13 +59,14 @@ func (s *Store) encryptFields(fields []model.Field) (string, error) {
 
 // decryptFields 反序列化并解密敏感字段值
 func (s *Store) decryptFields(raw string) ([]model.Field, error) {
+	c := s.cipher()
 	var fields []model.Field
 	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
 		return nil, err
 	}
 	for i := range fields {
 		if fields[i].IsSecret && fields[i].Value != "" {
-			plain, err := s.Cipher.Decrypt(fields[i].Value)
+			plain, err := c.Decrypt(fields[i].Value)
 			if err != nil {
 				return nil, fmt.Errorf("字段 %q 解密失败: %w", fields[i].Key, err)
 			}
@@ -275,4 +296,79 @@ func (s *Store) SaveTemplate(t *model.Template) error {
 func (s *Store) DeleteTemplate(id int64) error {
 	_, err := s.DB.Exec(`DELETE FROM category_templates WHERE id = ? AND builtin = 0`, id)
 	return err
+}
+
+// RotateAllEntries 用新密钥重加密全部条目并更新 settings.key_check；
+// 事务保证原子（失败回滚，旧密钥仍有效），成功后才替换内存密钥。返回重加密条数。
+func (s *Store) RotateAllEntries(newCipher *crypto.Cipher) (int, error) {
+	// 1) 读取全部密文（旧密钥仍生效）
+	rows, err := s.DB.Query(`SELECT id, fields FROM entries`)
+	if err != nil {
+		return 0, err
+	}
+	type rec struct {
+		id     int64
+		raw    string
+	}
+	var recs []rec
+	for rows.Next() {
+		var r rec
+		if err := rows.Scan(&r.id, &r.raw); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		recs = append(recs, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	// 2) 预计算：旧密钥解密 → 新密钥加密
+	type upd struct {
+		id     int64
+		fields string
+	}
+	updates := make([]upd, 0, len(recs))
+	for _, r := range recs {
+		plain, err := s.decryptFields(r.raw)
+		if err != nil {
+			return 0, fmt.Errorf("条目 %d: %w", r.id, err)
+		}
+		newJSON, err := encryptFieldsWith(newCipher, plain)
+		if err != nil {
+			return 0, fmt.Errorf("条目 %d 重加密失败: %w", r.id, err)
+		}
+		updates = append(updates, upd{r.id, newJSON})
+	}
+	kc, err := newCipher.KeyCheck()
+	if err != nil {
+		return 0, err
+	}
+
+	// 3) 事务落库（fields 全量重写 + key_check 更新）
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+	for _, u := range updates {
+		if _, err := tx.Exec(`UPDATE entries SET fields = ? WHERE id = ?`, u.fields, u.id); err != nil {
+			tx.Rollback()
+			return 0, err
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO settings (key, value) VALUES ('key_check', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, kc); err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	// 4) 成功后替换内存密钥（后续读写走新密钥）
+	s.mu.Lock()
+	s.Cipher = newCipher
+	s.mu.Unlock()
+	return len(updates), nil
 }

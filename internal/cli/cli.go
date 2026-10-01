@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"keyhive/internal/totp"
 )
 
 // Config ~/.keyhive/config.json
@@ -180,23 +182,23 @@ func Run(args []string) int {
 	case "status":
 		return cmdStatus(cfg)
 	case "list":
-		category := ""
-		if len(rest) >= 2 && rest[0] == "--category" {
-			category = rest[1]
-		}
-		return runRO(cfg, func() ([]byte, int, error) { return ListEntries(cfg, category) }, "token_read")
+		category, staleDays := parseListArgs(rest)
+		return cmdList(cfg, staleDays, func() ([]byte, int, error) { return ListEntries(cfg, category) })
 	case "search":
-		if len(rest) != 1 {
-			fmt.Fprintln(os.Stderr, "用法: keyhive search <关键词>")
+		q, staleDays := parseSearchArgs(rest)
+		if q == "" {
+			fmt.Fprintln(os.Stderr, "用法: keyhive search <关键词> [--stale <天>]")
 			return 2
 		}
-		return runRO(cfg, func() ([]byte, int, error) { return SearchEntries(cfg, rest[0]) }, "token_read")
+		return cmdList(cfg, staleDays, func() ([]byte, int, error) { return SearchEntries(cfg, q) })
 	case "get":
 		if len(rest) != 1 {
 			fmt.Fprintln(os.Stderr, "用法: keyhive get <id>")
 			return 2
 		}
 		return runRO(cfg, func() ([]byte, int, error) { return GetEntry(cfg, rest[0]) }, "token_read")
+	case "totp":
+		return cmdTOTP(cfg, rest)
 	case "reveal":
 		if len(rest) != 2 {
 			fmt.Fprintln(os.Stderr, "用法: keyhive reveal <id> <字段名>")
@@ -223,10 +225,216 @@ func Run(args []string) int {
 		return 0
 	case "add":
 		return cmdAdd(cfg, rest)
+	case "export":
+		return cmdExport(cfg, rest)
+	case "import":
+		return cmdImport(cfg, rest)
+	case "rotate-key":
+		return cmdRotateKey(cfg, rest)
 	default:
 		usage()
 		return 2
 	}
+}
+
+// parseListArgs 解析 list 的 [--category c] [--stale N]
+func parseListArgs(args []string) (category string, staleDays int) {
+	for i := 0; i < len(args)-1; i++ {
+		switch args[i] {
+		case "--category":
+			category = args[i+1]
+		case "--stale":
+			staleDays = atoi(args[i+1])
+		}
+	}
+	return
+}
+
+// parseSearchArgs 解析 search 的 <关键词> [--stale N]（关键词位置不限）
+func parseSearchArgs(args []string) (q string, staleDays int) {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--stale" && i+1 < len(args) {
+			staleDays = atoi(args[i+1])
+			i++
+		} else if q == "" && !strings.HasPrefix(args[i], "--") {
+			q = args[i]
+		}
+	}
+	return
+}
+
+func atoi(s string) int {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
+}
+
+// cmdList list/search 公共流程：拉取 → 统计/过滤超期 → 输出
+func cmdList(cfg *Config, staleDays int, call func() ([]byte, int, error)) int {
+	rc, out := runROCapture(cfg, call, "token_read")
+	if rc != 0 {
+		return rc
+	}
+	stale := countStale(out, 90)
+	if stale > 0 {
+		fmt.Fprintf(os.Stderr, "⚠️  %d 条超 90 天未更新（--stale 90 查看）\n", stale)
+	}
+	if staleDays > 0 {
+		filtered, err := filterStale(out, staleDays)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "错误:", err)
+			return 1
+		}
+		printJSON(filtered)
+		return 0
+	}
+	printJSON(out)
+	return 0
+}
+
+// runROCapture 与 runRO 相同流程但返回响应体（供后处理）
+func runROCapture(cfg *Config, call func() ([]byte, int, error), tokenField string) (int, []byte) {
+	if cfg.TokenRead == "" {
+		fmt.Fprintln(os.Stderr, "错误:", tokenHint(tokenField))
+		return 1, nil
+	}
+	data, code, err := call()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "错误:", err)
+		if sd, ok := err.(*ErrServiceDown); ok {
+			fmt.Fprintln(os.Stderr, sd.hint())
+		}
+		return 1, nil
+	}
+	if code != 200 {
+		os.Stderr.Write(append(data, '\n'))
+		return 1, nil
+	}
+	return 0, data
+}
+
+type staleEntry struct {
+	UpdatedAt string `json:"updated_at"`
+}
+
+// countStale 统计超 N 天未更新的条目数
+func countStale(data []byte, days int) int {
+	var list []staleEntry
+	if json.Unmarshal(data, &list) != nil {
+		return 0
+	}
+	n := 0
+	cutoff := time.Now().AddDate(0, 0, -days)
+	for _, e := range list {
+		if t, err := time.Parse(time.RFC3339, e.UpdatedAt); err == nil && t.Before(cutoff) {
+			n++
+		}
+	}
+	return n
+}
+
+// filterStale 仅保留超 N 天未更新的条目（返回原始 JSON 值列表，保持字段不动）
+func filterStale(data []byte, days int) ([]byte, error) {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	cutoff := time.Now().AddDate(0, 0, -days)
+	out := make([]json.RawMessage, 0, len(raw))
+	for _, item := range raw {
+		var e staleEntry
+		if json.Unmarshal(item, &e) == nil {
+			if t, err := time.Parse(time.RFC3339, e.UpdatedAt); err == nil && t.Before(cutoff) {
+				out = append(out, item)
+			}
+		}
+	}
+	return json.Marshal(out)
+}
+
+// cmdTOTP 生成条目的 6 位动态码（字段定位 → reveal 密钥 → 本地计算）
+func cmdTOTP(cfg *Config, args []string) int {
+	id, field := "", ""
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--field" && i+1 < len(args) {
+			field = args[i+1]
+			i++
+		} else if id == "" {
+			id = args[i]
+		}
+	}
+	if id == "" {
+		fmt.Fprintln(os.Stderr, "用法: keyhive totp <id> [--field totp_secret]")
+		return 2
+	}
+	if cfg.TokenRead == "" || cfg.TokenReveal == "" {
+		fmt.Fprintln(os.Stderr, "错误:", tokenHint("token_read/token_reveal"))
+		return 1
+	}
+	// 1) 遮蔽版详情 → 定位 TOTP 字段
+	rc, data := runROCapture(cfg, func() ([]byte, int, error) { return GetEntry(cfg, id) }, "token_read")
+	if rc != 0 {
+		return rc
+	}
+	var e struct {
+		Title  string `json:"entry_title"`
+		Fields []struct {
+			Key         string `json:"key"`
+			Description string `json:"description"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal(data, &e); err != nil {
+		fmt.Fprintln(os.Stderr, "错误: 响应解析失败:", err)
+		return 1
+	}
+	if field == "" {
+		for _, f := range e.Fields {
+			if strings.Contains(strings.ToLower(f.Key), "totp") ||
+				strings.Contains(f.Description, "TOTP") || strings.Contains(f.Description, "两步验证") {
+				field = f.Key
+				break
+			}
+		}
+	}
+	if field == "" {
+		fmt.Fprintf(os.Stderr, "错误: 未在该条目中找到 TOTP 字段（key 含 totp 或说明含 TOTP/两步验证），请用 --field 指定\n")
+		return 1
+	}
+	// 2) reveal 密钥明文（记审计）
+	revData, code, err := RevealField(cfg, id, field)
+	if err != nil || code != 200 {
+		fmt.Fprintln(os.Stderr, "错误: 取密钥失败:", err)
+		if code != 200 && revData != nil {
+			os.Stderr.Write(append(revData, '\n'))
+		}
+		return 1
+	}
+	var rev struct {
+		EntryTitle string `json:"entry_title"`
+		Value      string `json:"value"`
+	}
+	json.Unmarshal(revData, &rev)
+	// 3) 本地计算（兼容纯密钥与 otpauth:// URI）
+	otp, remain, err := totp.Current(totp.ParseOTAuth(rev.Value))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "错误: 字段值不是有效的 TOTP 密钥:", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stdout, "%s\n", otp)
+	fmt.Fprintf(os.Stderr, "条目 %s | 字段 %s | %d 秒后过期 | 已记审计\n", orDefault(rev.EntryTitle, e.Title), field, remain)
+	return 0
+}
+
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
 }
 
 // runRO 只读命令的公共流程（token 检查 → 调用 → 错误处理 → 输出）

@@ -1,7 +1,9 @@
 package store
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 
@@ -38,6 +40,10 @@ var testSchema = []string{
 		ai_visible INTEGER NOT NULL DEFAULT 1,
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
+	)`,
+	`CREATE TABLE settings (
+		key   TEXT PRIMARY KEY,
+		value TEXT NOT NULL
 	)`,
 }
 
@@ -139,4 +145,54 @@ func extractValue(t *testing.T, fieldsJSON, key string) string {
 		}
 	}
 	return ""
+}
+
+func TestRotateAllEntries(t *testing.T) {
+	st := newTestStore(t)
+	e1 := model.Entry{Title: "A", Fields: []model.Field{
+		{Key: "pw", Type: "text", IsSecret: true, Value: "secret-A"},
+		{Key: "host", Type: "text", Value: "h1"},
+	}}
+	e2 := model.Entry{Title: "B", Fields: []model.Field{
+		{Key: "sk", Type: "text", IsSecret: true, Value: "secret-B"},
+	}}
+	st.CreateEntry(&e1)
+	st.CreateEntry(&e2)
+
+	var raw1 string
+	st.DB.QueryRow(`SELECT fields FROM entries WHERE id = ?`, e1.ID).Scan(&raw1)
+
+	// 新随机密钥轮换
+	raw := make([]byte, 32)
+	rand.Read(raw)
+	newCipher, err := crypto.New(crypto.DeriveKeyText(base64.StdEncoding.EncodeToString(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := st.RotateAllEntries(newCipher)
+	if err != nil || n != 2 {
+		t.Fatalf("轮换失败: n=%d err=%v", n, err)
+	}
+
+	// 密文已变化且仍是密文
+	var raw2 string
+	st.DB.QueryRow(`SELECT fields FROM entries WHERE id = ?`, e1.ID).Scan(&raw2)
+	if raw2 == raw1 || !crypto.IsEncrypted(extractValue(t, raw2, "pw")) {
+		t.Fatal("轮换后密文未更新")
+	}
+	// 内存密钥已切换：正常读回明文
+	got, err := st.GetEntry(e1.ID)
+	if err != nil || got.FieldByKey("pw").Value != "secret-A" {
+		t.Fatalf("新密钥读回失败: %v", err)
+	}
+	got2, _ := st.GetEntry(e2.ID)
+	if got2.FieldByKey("sk").Value != "secret-B" {
+		t.Fatal("条目2 读回失败")
+	}
+	// key_check 已更新为新密钥的校验值
+	var kc string
+	st.DB.QueryRow(`SELECT value FROM settings WHERE key = 'key_check'`).Scan(&kc)
+	if !newCipher.VerifyKeyCheck(kc) {
+		t.Fatal("key_check 未更新为新密钥校验值")
+	}
 }
