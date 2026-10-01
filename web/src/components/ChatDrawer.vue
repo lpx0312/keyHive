@@ -13,18 +13,21 @@
         <!-- 草稿卡片：预览 → 确认入库 / 丢弃 -->
         <el-card v-if="m.draft && !m.done" class="draft" shadow="hover">
           <template #header>
+            <el-tag v-if="m.draftKind === 'update'" type="warning" size="small" style="margin-right: 6px">更新 #{{ m.draftEntryID }}</el-tag>
             <b>{{ m.draft.title }}</b>
             <el-tag size="small" style="margin-left: 6px">{{ m.draft.category }}</el-tag>
             <el-tag v-if="!m.draft.ai_visible" size="small" type="warning" style="margin-left: 4px">AI 不可见</el-tag>
           </template>
           <div class="drow" v-for="f in m.draft.fields" :key="f.key">
             <code>{{ f.key }}</code>
-            <span class="dval">{{ f.is_secret ? '🔒 ' + maskLen(f.value) : f.value }}</span>
+            <span class="dval">{{ f.is_secret ? (f.value === '***' ? '🔒 保留库中原值' : '🔒 ' + maskLen(f.value)) : f.value }}</span>
             <small class="ddesc">{{ f.description }}</small>
           </div>
           <p v-if="m.draft.description" class="ddesc2">{{ m.draft.description }}</p>
           <div class="dbtns">
-            <el-button type="primary" size="small" :loading="m.saving" @click="saveDraft(m)">确认入库</el-button>
+            <el-button type="primary" size="small" :loading="m.saving" @click="saveDraft(m)">
+              {{ m.draftKind === 'update' ? '确认更新' : '确认入库' }}
+            </el-button>
             <el-button size="small" @click="m.done = 'discarded'">丢弃</el-button>
           </div>
         </el-card>
@@ -53,6 +56,8 @@ interface Msg {
   role: 'user' | 'assistant'
   content: string
   draft?: Entry
+  draftKind?: 'create' | 'update'
+  draftEntryID?: number
   done?: 'saved' | 'discarded'
   saving?: boolean
 }
@@ -92,6 +97,8 @@ async function send() {
       role: 'assistant',
       content: res.reply || '（解析完成，请确认下方草稿）',
       draft: res.draft || undefined,
+      draftKind: res.draft_kind || 'create',
+      draftEntryID: res.draft_entry_id || 0,
     })
   } catch (e: any) {
     messages.value.push({ role: 'assistant', content: '❌ ' + e.message })
@@ -105,10 +112,14 @@ async function saveDraft(m: Msg) {
   if (!m.draft) return
   m.saving = true
   try {
-    // 复用现有创建 API：校验 + AES 加密 + 审计全走原通道
-    await api('/entries', { method: 'POST', body: JSON.stringify(m.draft) })
+    // 复用现有 API：新建 POST / 更新 PUT（*** 敏感值由后端保留原值），校验 + AES 加密 + 审计全走原通道
+    if (m.draftKind === 'update' && m.draftEntryID) {
+      await api(`/entries/${m.draftEntryID}`, { method: 'PUT', body: JSON.stringify(m.draft) })
+    } else {
+      await api('/entries', { method: 'POST', body: JSON.stringify(m.draft) })
+    }
     m.done = 'saved'
-    ElMessage.success(`已入库：${m.draft.title}`)
+    ElMessage.success(`${m.draftKind === 'update' ? '已更新' : '已入库'}：${m.draft.title}`)
   } catch (e: any) {
     ElMessage.error(e.message)
   } finally {

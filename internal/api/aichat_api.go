@@ -139,15 +139,38 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp, err := aichat.Chat(r.Context(), cfg, aichat.SystemPrompt(categories), req.Messages, req.Text)
+	// 查询回调：复用列表逻辑，只给 LLM ai_visible=true 的条目且敏感值遮蔽（隐身条目内容不出库）
+	cb := aichat.ToolCallbacks{
+		SearchEntries: func(query string) ([]model.Entry, error) {
+			list, err := s.Store.ListEntries(query, "")
+			if err != nil {
+				return nil, err
+			}
+			out := make([]model.Entry, 0, len(list))
+			for i := range list {
+				if !list[i].AIVisible {
+					continue
+				}
+				list[i].MaskSecrets()
+				out = append(out, list[i])
+			}
+			return out, nil
+		},
+	}
+
+	resp, err := aichat.Chat(r.Context(), cfg, aichat.SystemPrompt(categories), req.Messages, req.Text, cb)
 	if err != nil {
 		writeErr(w, 502, err.Error())
 		return
 	}
 	uid, _ := auth.UserID(r.Context())
 	if resp.Draft != nil {
-		audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionAIChatDraft, nil,
-			`{"title":"`+resp.Draft.Title+`","category":"`+resp.Draft.Category+`"}`, clientIP(r))
+		detail := `{"kind":"` + resp.DraftKind + `","title":"` + resp.Draft.Title + `","category":"` + resp.Draft.Category + `"`
+		if resp.DraftEntryID > 0 {
+			detail += `,"entry_id":` + fmtInt(resp.DraftEntryID)
+		}
+		detail += "}"
+		audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionAIChatDraft, nil, detail, clientIP(r))
 	}
 	writeJSON(w, 200, resp)
 }
@@ -164,6 +187,28 @@ func boolStr(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func fmtInt(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	var b [20]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		b[i] = '-'
+	}
+	return string(b[i:])
 }
 
 // handleAIConfigTest 测试 LLM 连通性：优先用表单当前值；Key 为空/遮蔽时回退已保存值
