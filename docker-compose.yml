@@ -5,6 +5,9 @@ services:
       # 走国内源构建（npm → npmmirror，Go → goproxy.cn）；改回 "0" 用官方源
       args:
         USE_CN_MIRROR: "1"
+        # 版本号注入（keyhive version / 设置页显示）；发版后更新：
+        #   KEYHIVE_VERSION=1.2.3 docker compose up -d --build
+        VERSION: ${KEYHIVE_VERSION:-dev}
     image: keyhive:latest
     container_name: keyhive
     restart: unless-stopped
