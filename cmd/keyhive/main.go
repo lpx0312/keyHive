@@ -154,6 +154,11 @@ func spaHandler(dist fs.FS) http.Handler {
 			// 前端路由路径 → 回退到 SPA 入口
 			r.URL.Path = "/"
 		}
+		// index.html 禁缓存：assets 文件名带 hash 可长缓存，但入口必须每次校验，
+		// 否则发版后浏览器仍按旧 index.html 加载旧资源（联动/修复"不生效"的根因）
+		if r.URL.Path == "/" || path == "index.html" {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
 		fileServer.ServeHTTP(w, r)
 	})
 }

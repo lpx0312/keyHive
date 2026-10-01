@@ -21,9 +21,10 @@ export async function loadMe() {
   }
 }
 
-// 条目数据版本号：AI 助手等全局组件改动条目后递增，列表页监听自动刷新
-export const entryVersion = ref(0)
+// 条目变更通知：AI 助手等全局组件改动条目后广播，列表页监听自动刷新。
+// 用 window 事件而非本模块 ref——懒加载 chunk 可能各自内联一份 store 导致双实例
+export const ENTRIES_CHANGED_EVENT = 'keyhive:entries-changed'
 
-export function bumpEntries() {
-  entryVersion.value++
+export function notifyEntriesChanged() {
+  window.dispatchEvent(new CustomEvent(ENTRIES_CHANGED_EVENT))
 }
