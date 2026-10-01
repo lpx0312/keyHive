@@ -32,7 +32,7 @@ func main() {
 		switch os.Args[1] {
 		case "serve":
 			// 继续启动服务
-		case "list", "search", "get", "reveal", "status", "add", "totp", "export", "import", "rotate-key", "help", "-h", "--help":
+		case "list", "search", "get", "reveal", "status", "add", "edit", "totp", "export", "import", "rotate-key", "help", "-h", "--help":
 			os.Exit(cli.Run(os.Args[1:]))
 		case "version", "-v", "--version":
 			fmt.Println(version.String())

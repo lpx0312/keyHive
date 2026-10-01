@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -40,12 +39,14 @@ func ConfigPath() string {
 	return filepath.Join(home, ".keyhive", "config.json")
 }
 
-// LoadConfig 读取配置；文件不存在时返回带默认值的空配置
+// LoadConfig 读取配置；KEYHIVE_BASE_URL 环境变量可临时覆盖服务地址
+// （不改配置文件即可连另一台机器的实例，MCP 同样生效）
 func LoadConfig() (*Config, error) {
 	cfg := &Config{}
 	data, err := os.ReadFile(ConfigPath())
 	if err != nil {
 		if os.IsNotExist(err) {
+			applyBaseURLOverride(cfg)
 			return cfg, nil
 		}
 		return nil, err
@@ -53,7 +54,14 @@ func LoadConfig() (*Config, error) {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("配置文件格式错误 %s: %w", ConfigPath(), err)
 	}
+	applyBaseURLOverride(cfg)
 	return cfg, nil
+}
+
+func applyBaseURLOverride(cfg *Config) {
+	if env := strings.TrimSpace(os.Getenv("KEYHIVE_BASE_URL")); env != "" {
+		cfg.BaseURL = env
+	}
 }
 
 // ErrServiceDown 服务不可达（Run 层转成启动指引）
@@ -117,36 +125,7 @@ func RevealField(cfg *Config, id, field string) ([]byte, int, error) {
 
 // AddEntry 人用通道录入：admin 登录换取会话 cookie 后创建条目（AI 令牌保持只读）
 func AddEntry(cfg *Config, user, pass string, entryJSON []byte) ([]byte, int, error) {
-	base := cfg.BaseURL
-	if base == "" {
-		base = defaultBaseURL
-	}
-	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Timeout: 15 * time.Second, Jar: jar}
-
-	loginBody, _ := json.Marshal(map[string]string{"username": user, "password": pass})
-	loginResp, err := client.Post(base+"/api/v1/auth/login", "application/json", bytes.NewReader(loginBody))
-	if err != nil {
-		return nil, 0, &ErrServiceDown{Base: base}
-	}
-	lb, _ := io.ReadAll(loginResp.Body)
-	loginResp.Body.Close()
-	if loginResp.StatusCode != 200 {
-		return lb, loginResp.StatusCode, fmt.Errorf("登录失败（HTTP %d）", loginResp.StatusCode)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, base+"/api/v1/entries", bytes.NewReader(entryJSON))
-	if err != nil {
-		return nil, 0, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, 0, &ErrServiceDown{Base: base}
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	return data, resp.StatusCode, nil
+	return adminCall(cfg, user, pass, http.MethodPost, "/api/v1/entries", entryJSON)
 }
 
 // tokenHint 令牌未配置时的指引
@@ -225,6 +204,8 @@ func Run(args []string) int {
 		return 0
 	case "add":
 		return cmdAdd(cfg, rest)
+	case "edit":
+		return cmdEdit(cfg, rest)
 	case "export":
 		return cmdExport(cfg, rest)
 	case "import":
@@ -559,10 +540,12 @@ func usage() {
   keyhive reveal <id> <字段名>      取单字段明文（记审计）
   keyhive totp <id> [--field <字段>] 生成 6 位两步验证动态码（需 reveal 令牌，记审计）
   keyhive add --file <条目.json>    录入条目（admin 登录，--pass 或 KEYHIVE_ADMIN_PASS）
+  keyhive edit <id> <field>=<value> 更新条目字段（admin；密码轮换后更新库值，未提及的敏感字段保留原值）
   keyhive import --file <csv> --format bitwarden|chrome [--dry-run]  批量导入
   keyhive export [--masked]         全库导出（admin；--masked 敏感值遮蔽）
   keyhive rotate-key                主密钥轮换：重加密全部条目（admin，记审计）
   keyhive mcp                       以 stdio MCP server 运行（供 AI 客户端接入）
 
-配置: ~/.keyhive/config.json（KEYHIVE_CONFIG 环境变量可覆盖）`)
+配置: ~/.keyhive/config.json（KEYHIVE_CONFIG 环境变量可覆盖）
+地址: KEYHIVE_BASE_URL 环境变量可临时指向其他实例（如 http://192.168.0.10:8020）`)
 }

@@ -129,9 +129,9 @@ func TestAddEntryLoginAndCreate(t *testing.T) {
 		t.Fatalf("条目 body 错误: %v", gotBody)
 	}
 
-	// 错误密码 → 登录失败错误
-	_, code, err = AddEntry(cfg, "admin", "bad", entry)
-	if err == nil || code == 0 {
+	// 错误密码 → 登录失败错误（adminCall 通道：err 必非空）
+	_, _, err = AddEntry(cfg, "admin", "bad", entry)
+	if err == nil {
 		t.Fatal("错误密码应报登录失败")
 	}
 }

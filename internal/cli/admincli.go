@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -239,5 +240,97 @@ func cmdRotateKey(cfg *Config, args []string) int {
 	if res.NewMasterKey != "" {
 		fmt.Fprintf(os.Stderr, "⚠️  当前密钥来源是环境变量，服务无法代写。请立即更新 KEYHIVE_MASTER_KEY 为：\n%s\n并重启服务；在此之前服务内存中已使用新密钥继续运行\n", res.NewMasterKey)
 	}
+	return 0
+}
+
+// ---- edit（更新条目字段，补全密码轮换闭环） ----
+
+// cmdEdit 用法：keyhive edit <id> <field>=<value> [<field>=<value>...]
+// field 可为字段 key（仅限已存在字段）、title、category、description、ai_visible；
+// 未提及的敏感字段以遮蔽值回传，由服务端保留原值（无需全量明文）。
+func cmdEdit(cfg *Config, args []string) int {
+	fs, user, pass := adminFlags(args)
+	rest := fs.Args()
+	if len(rest) < 2 {
+		fmt.Fprintln(os.Stderr, "用法: keyhive edit <id> <field>=<value> [<field>=<value>...]\n示例: keyhive edit 3 password=NewP@ss")
+		return 2
+	}
+	if *pass == "" {
+		fmt.Fprintln(os.Stderr, "错误: 未提供管理员密码（--pass 或环境变量 KEYHIVE_ADMIN_PASS）")
+		return 1
+	}
+	id := url.PathEscape(rest[0])
+
+	// 解析 field=value（值可含 = 号）
+	pairs := map[string]string{}
+	var order []string
+	for _, a := range rest[1:] {
+		s := strings.SplitN(a, "=", 2)
+		if len(s) != 2 || s[0] == "" {
+			fmt.Fprintf(os.Stderr, "错误: 参数应为 <field>=<value>，得到 %q\n", a)
+			return 2
+		}
+		pairs[s[0]] = s[1]
+		order = append(order, s[0])
+	}
+
+	// 取当前条目（admin 会话，遮蔽版——敏感值为 ***，服务端 PUT 时保留原值）
+	data, code, err := adminCall(cfg, *user, *pass, http.MethodGet, "/api/v1/entries/"+id, nil)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "错误:", err)
+		return 1
+	}
+	if code != 200 {
+		os.Stderr.Write(append(data, '\n'))
+		return 1
+	}
+	var e map[string]any
+	if err := json.Unmarshal(data, &e); err != nil {
+		fmt.Fprintln(os.Stderr, "错误: 响应解析失败:", err)
+		return 1
+	}
+
+	// 应用修改
+	for _, k := range order {
+		v := pairs[k]
+		switch k {
+		case "title", "category", "description":
+			e[k] = v
+		case "ai_visible":
+			e[k] = v == "true" || v == "1"
+		default:
+			fields, _ := e["fields"].([]any)
+			found := false
+			for _, f := range fields {
+				m, ok := f.(map[string]any)
+				if !ok || m["key"] != k {
+					continue
+				}
+				if b, _ := m["is_secret"].(bool); b && v == "***" {
+					fmt.Fprintf(os.Stderr, "错误: 字段 %s 是敏感字段，不能显式设为 ***（省略该字段即保留原值）\n", k)
+					return 2
+				}
+				m["value"] = v
+				found = true
+			}
+			if !found {
+				fmt.Fprintf(os.Stderr, "错误: 条目中不存在字段 %q（新增字段请用 Web 表单或 add，需要填写给 AI 的注释）\n", k)
+				return 2
+			}
+		}
+	}
+
+	body, _ := json.Marshal(e)
+	data2, code2, err := adminCall(cfg, *user, *pass, http.MethodPut, "/api/v1/entries/"+id, body)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "错误:", err)
+		return 1
+	}
+	if code2 != 200 {
+		os.Stderr.Write(append(data2, '\n'))
+		return 1
+	}
+	printJSON(data2)
+	fmt.Fprintf(os.Stderr, "✅ 已更新 %d 项（未提及的敏感字段保留原值；已记审计）\n", len(order))
 	return 0
 }
