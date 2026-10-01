@@ -90,7 +90,12 @@ keyhive list [--category mysql]   # 列出条目（遮蔽，含注释）
 keyhive search "SWR"              # 搜索（中文/英文均可）
 keyhive get 3                     # 条目详情（遮蔽）
 keyhive reveal 3 password         # 取单字段明文（记审计）
+keyhive totp 5                    # 生成两步验证 6 位动态码（30 秒有效，记审计）
 keyhive add --file entry.json     # 录入条目（admin 登录；密码用 --pass 或 KEYHIVE_ADMIN_PASS 环境变量传入，避免进 shell 历史）
+keyhive list --stale 90           # 只看超 90 天未更新的条目（密码轮换提醒）
+keyhive import --file bitwarden.csv --format bitwarden [--dry-run]  # 从 Bitwarden/Chrome CSV 批量导入
+keyhive export [--masked]         # 全库导出（admin；--masked 输出遮蔽版；明文导出记审计）
+keyhive rotate-key                # 主密钥轮换：重加密全部条目+更新 key_check（admin，记审计）
 ```
 
 CI 示例（GitHub Actions 中取密码做 docker login）：

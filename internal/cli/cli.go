@@ -551,12 +551,17 @@ func usage() {
 
 用法:
   keyhive serve                     启动服务（默认）
+  keyhive version                   版本信息
   keyhive status                    检查服务/配置/令牌
-  keyhive list [--category <分类>]  列出条目（遮蔽，含注释）
-  keyhive search <关键词>           搜索
+  keyhive list [--category <分类>] [--stale <天>]  列出条目（遮蔽；--stale 只看超 N 天未更新）
+  keyhive search <关键词> [--stale <天>]           搜索
   keyhive get <id>                  条目详情（遮蔽）
   keyhive reveal <id> <字段名>      取单字段明文（记审计）
-  keyhive add --file <条目.json>   录入条目（admin 登录，--pass 或 KEYHIVE_ADMIN_PASS）
+  keyhive totp <id> [--field <字段>] 生成 6 位两步验证动态码（需 reveal 令牌，记审计）
+  keyhive add --file <条目.json>    录入条目（admin 登录，--pass 或 KEYHIVE_ADMIN_PASS）
+  keyhive import --file <csv> --format bitwarden|chrome [--dry-run]  批量导入
+  keyhive export [--masked]         全库导出（admin；--masked 敏感值遮蔽）
+  keyhive rotate-key                主密钥轮换：重加密全部条目（admin，记审计）
   keyhive mcp                       以 stdio MCP server 运行（供 AI 客户端接入）
 
 配置: ~/.keyhive/config.json（KEYHIVE_CONFIG 环境变量可覆盖）`)
