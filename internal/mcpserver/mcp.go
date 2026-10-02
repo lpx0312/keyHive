@@ -11,8 +11,8 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"keyhive/internal/cli"
-	"keyhive/internal/version"
+	"github.com/lpx0312/keyHive/internal/cli"
+	"github.com/lpx0312/keyHive/internal/version"
 )
 
 const discipline = "纪律：先用遮蔽信息（字段名+description 注释）判断，能不取明文就不取；明文只注入执行环境，绝不写入文件/git/对话正文；每次 reveal 均记审计。"

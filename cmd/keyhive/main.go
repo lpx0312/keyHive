@@ -14,16 +14,16 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"keyhive/internal/aiapi"
-	"keyhive/internal/api"
-	"keyhive/internal/auth"
-	"keyhive/internal/cli"
-	"keyhive/internal/crypto"
-	kdb "keyhive/internal/db"
-	"keyhive/internal/mcpserver"
-	"keyhive/internal/store"
-	"keyhive/internal/version"
-	"keyhive/web"
+	"github.com/lpx0312/keyHive/internal/aiapi"
+	"github.com/lpx0312/keyHive/internal/api"
+	"github.com/lpx0312/keyHive/internal/auth"
+	"github.com/lpx0312/keyHive/internal/cli"
+	"github.com/lpx0312/keyHive/internal/crypto"
+	kdb "github.com/lpx0312/keyHive/internal/db"
+	"github.com/lpx0312/keyHive/internal/mcpserver"
+	"github.com/lpx0312/keyHive/internal/store"
+	"github.com/lpx0312/keyHive/internal/version"
+	"github.com/lpx0312/keyHive/web"
 )
 
 func main() {
@@ -32,7 +32,7 @@ func main() {
 		switch os.Args[1] {
 		case "serve":
 			// 继续启动服务
-		case "list", "search", "get", "reveal", "status", "add", "edit", "totp", "export", "import", "rotate-key", "help", "-h", "--help":
+		case "login", "list", "search", "get", "reveal", "status", "add", "edit", "totp", "export", "import", "rotate-key", "help", "-h", "--help":
 			os.Exit(cli.Run(os.Args[1:]))
 		case "version", "-v", "--version":
 			fmt.Println(version.String())

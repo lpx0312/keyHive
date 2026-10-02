@@ -9,8 +9,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"keyhive/internal/crypto"
-	"keyhive/internal/model"
+	"github.com/lpx0312/keyHive/internal/crypto"
+	"github.com/lpx0312/keyHive/internal/model"
 )
 
 // testDB 每次全新内存库（含表结构，跳过种子）

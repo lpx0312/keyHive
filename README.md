@@ -82,9 +82,10 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 
 ## CLI（终端 / 脚本 / CI 取密钥）
 
-同一个二进制内置客户端子命令，配置读 `~/.keyhive/config.json`（`KEYHIVE_CONFIG` 环境变量可覆盖）：
+同一个二进制内置客户端子命令。安装：从 [Releases](https://github.com/lpx0312/keyHive/releases) 下载对应平台包、把二进制放进 PATH，或有 Go 环境时 `go install github.com/lpx0312/keyHive/cmd/keyhive@latest`。配置读 `~/.keyhive/config.json`（`KEYHIVE_CONFIG` 环境变量可覆盖），用 `keyhive login` 创建/更新（合并写入，写前校验连通性）：
 
 ```bash
+keyhive login --url http://localhost:8020 --token-read kh_xxx --token-reveal kh_yyy  # 配置实例与令牌（令牌在 Web UI「AI 令牌」页创建）
 keyhive status                    # 检查服务/配置/令牌
 keyhive list [--category mysql]   # 列出条目（遮蔽，含注释）
 keyhive search "SWR"              # 搜索（中文/英文均可）
@@ -115,7 +116,7 @@ CI 示例（GitHub Actions 中取密码做 docker login）：
 {
   "mcpServers": {
     "keyhive": {
-      "command": "/path/to/keyhive",
+      "command": "keyhive",
       "args": ["mcp"]
     }
   }

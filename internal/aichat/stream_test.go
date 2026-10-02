@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"keyhive/internal/model"
+	"github.com/lpx0312/keyHive/internal/model"
 )
 
 // sseMock 模拟流式 LLM：轮次脚本，每轮一串 SSE chunk

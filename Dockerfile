@@ -21,7 +21,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web /src/web/dist ./web/dist
-RUN go build -ldflags="-s -w -X keyhive/internal/version.Version=${VERSION}" -o /out/keyhive ./cmd/keyhive
+RUN go build -ldflags="-s -w -X github.com/lpx0312/keyHive/internal/version.Version=${VERSION}" -o /out/keyhive ./cmd/keyhive
 
 # ---- 运行镜像 ----
 FROM alpine:3.21

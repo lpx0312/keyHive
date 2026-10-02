@@ -7,9 +7,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"keyhive/internal/audit"
-	"keyhive/internal/auth"
-	"keyhive/internal/model"
+	"github.com/lpx0312/keyHive/internal/audit"
+	"github.com/lpx0312/keyHive/internal/auth"
+	"github.com/lpx0312/keyHive/internal/model"
 )
 
 // ---- 模板管理 ----

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"keyhive/internal/totp"
+	"github.com/lpx0312/keyHive/internal/totp"
 )
 
 // Config ~/.keyhive/config.json
@@ -158,6 +158,8 @@ func Run(args []string) int {
 
 	cmd, rest := args[0], args[1:]
 	switch cmd {
+	case "login":
+		return cmdLogin(rest)
 	case "status":
 		return cmdStatus(cfg)
 	case "list":
@@ -533,7 +535,8 @@ func usage() {
 用法:
   keyhive serve                     启动服务（默认）
   keyhive version                   版本信息
-  keyhive status                    检查服务/配置/令牌
+	keyhive login [--url <地址>] [--token-read ...] [--token-reveal ...]  创建/更新配置（合并写入，写前校验连通性）
+	keyhive status                    检查服务/配置/令牌
   keyhive list [--category <分类>] [--stale <天>]  列出条目（遮蔽；--stale 只看超 N 天未更新）
   keyhive search <关键词> [--stale <天>]           搜索
   keyhive get <id>                  条目详情（遮蔽）

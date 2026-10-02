@@ -1,4 +1,4 @@
-module keyhive
+module github.com/lpx0312/keyHive
 
 go 1.26.4
 
@@ -6,6 +6,7 @@ require (
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/mark3labs/mcp-go v1.1.1
 	golang.org/x/crypto v0.57.0
+	golang.org/x/term v0.46.0
 	modernc.org/sqlite v1.60.1
 )
 

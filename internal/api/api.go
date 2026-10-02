@@ -8,10 +8,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"keyhive/internal/audit"
-	"keyhive/internal/auth"
-	"keyhive/internal/model"
-	"keyhive/internal/store"
+	"github.com/lpx0312/keyHive/internal/audit"
+	"github.com/lpx0312/keyHive/internal/auth"
+	"github.com/lpx0312/keyHive/internal/model"
+	"github.com/lpx0312/keyHive/internal/store"
 )
 
 // Server 人用 API（session cookie 认证）

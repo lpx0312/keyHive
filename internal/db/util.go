@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"keyhive/internal/model"
+	"github.com/lpx0312/keyHive/internal/model"
 )
 
 func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }

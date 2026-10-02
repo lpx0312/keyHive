@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"testing"
 
-	"keyhive/internal/auth"
-	kdb "keyhive/internal/db"
-	"keyhive/internal/store"
+	"github.com/lpx0312/keyHive/internal/auth"
+	kdb "github.com/lpx0312/keyHive/internal/db"
+	"github.com/lpx0312/keyHive/internal/store"
 )
 
 type Fixture struct {

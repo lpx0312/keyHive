@@ -9,11 +9,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"keyhive/internal/audit"
-	"keyhive/internal/importer"
-	"keyhive/internal/model"
-	"keyhive/internal/totp"
-	"keyhive/internal/version"
+	"github.com/lpx0312/keyHive/internal/audit"
+	"github.com/lpx0312/keyHive/internal/importer"
+	"github.com/lpx0312/keyHive/internal/model"
+	"github.com/lpx0312/keyHive/internal/totp"
+	"github.com/lpx0312/keyHive/internal/version"
 )
 
 // versionInfo 版本信息（未认证，登录页/关于均可显示）

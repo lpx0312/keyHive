@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"keyhive/internal/totp"
+	"github.com/lpx0312/keyHive/internal/totp"
 )
 
 // Entry 解析后的待导入条目

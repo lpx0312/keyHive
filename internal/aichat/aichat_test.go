@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"keyhive/internal/model"
+	"github.com/lpx0312/keyHive/internal/model"
 )
 
 // mockLLMScript 按脚本依次返回响应：每轮一个 {toolCalls | content}

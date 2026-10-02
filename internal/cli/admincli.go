@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"keyhive/internal/importer"
+	"github.com/lpx0312/keyHive/internal/importer"
 )
 
 // adminClient admin 登录换取带会话 cookie 的 client（export/import/rotate-key/add 共用）

@@ -10,7 +10,7 @@ import (
 	"errors"
 	"time"
 
-	"keyhive/internal/model"
+	"github.com/lpx0312/keyHive/internal/model"
 )
 
 const SessionTTL = 7 * 24 * time.Hour

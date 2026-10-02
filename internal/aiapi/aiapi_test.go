@@ -9,9 +9,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"keyhive/internal/auth"
-	"keyhive/internal/kdbtest"
-	"keyhive/internal/model"
+	"github.com/lpx0312/keyHive/internal/auth"
+	"github.com/lpx0312/keyHive/internal/kdbtest"
+	"github.com/lpx0312/keyHive/internal/model"
 )
 
 // newTestServer 搭建与 main 相同结构的路由（内存库 + 随机主密钥）

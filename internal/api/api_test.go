@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"keyhive/internal/kdbtest"
+	"github.com/lpx0312/keyHive/internal/kdbtest"
 )
 
 const adminPW = "admin-test-PW123"

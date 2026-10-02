@@ -1,6 +1,6 @@
 package templates
 
-import "keyhive/internal/model"
+import "github.com/lpx0312/keyHive/internal/model"
 
 // Group 分组名
 const (

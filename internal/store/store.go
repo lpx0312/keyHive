@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"keyhive/internal/crypto"
-	"keyhive/internal/model"
+	"github.com/lpx0312/keyHive/internal/crypto"
+	"github.com/lpx0312/keyHive/internal/model"
 )
 
 // Store 条目/模板存取：负责 fields JSON 与敏感字段加解密的衔接。

@@ -2,7 +2,7 @@ package audit
 
 import (
 	"database/sql"
-	"keyhive/internal/model"
+	"github.com/lpx0312/keyHive/internal/model"
 	"time"
 )
 

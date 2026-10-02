@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"keyhive/internal/model"
+	"github.com/lpx0312/keyHive/internal/model"
 )
 
 // Config LLM 连接配置（存 settings 表；APIKey 落库前由 API 层加密）

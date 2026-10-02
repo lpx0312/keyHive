@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"keyhive/internal/model"
+	"github.com/lpx0312/keyHive/internal/model"
 )
 
 // StreamEvent SSE 事件：前端按 type 渐进更新 UI

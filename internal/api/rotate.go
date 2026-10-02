@@ -8,9 +8,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"keyhive/internal/audit"
-	"keyhive/internal/crypto"
-	"keyhive/internal/model"
+	"github.com/lpx0312/keyHive/internal/audit"
+	"github.com/lpx0312/keyHive/internal/crypto"
+	"github.com/lpx0312/keyHive/internal/model"
 )
 
 // rotateKey 主密钥轮换（admin）：新随机密钥重加密全部条目 + 更新 key_check，

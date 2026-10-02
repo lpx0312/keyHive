@@ -5,34 +5,44 @@ description: 从 keyHive 密钥管家查询/取用凭据。任务需要任何凭
 
 # keyHive 密钥管家
 
-keyHive 是密钥管家服务（默认 http://localhost:8020，Docker 容器 keyhive）。库里每条目目字段结构自由、每个字段带用户手写的注释——**先读注释理解字段含义，再决定用什么**。
+keyHive 是自托管密钥管家：服务端跑在容器里（类似 GitHub 之于 gh，实例可部署在任意主机），`keyhive` CLI 是它的客户端，通过配置指向任意实例。**本 skill 假定 CLI 已安装且在 PATH 中、已通过 `~/.keyhive/config.json` 或环境变量连上目标实例**；不满足时按「安装」「认证与配置」节引导，不要猜测二进制或实例的绝对路径。
+
+库里每条条目字段结构自由、每个字段带用户手写的注释——**先读注释理解字段含义，再决定用什么**。
+
+## 安装（CLI 缺失或需升级时）
+
+优先用 GitHub Releases 预编译产物（<https://github.com/lpx0312/keyHive/releases>，包名 `keyhive-v<版本>-<os>-<arch>`，附 sha256）：
+
+```bash
+# 解压后把 keyhive 二进制放进 PATH：
+#   Windows: %USERPROFILE%\bin    macOS/Linux: /usr/local/bin 或 ~/.local/bin
+keyhive version    # 验证安装；版本应与服务端兼容（服务端版本见 Web UI 设置页）
+```
+
+有 Go 环境时也可远程安装（免克隆仓库）：`go install github.com/lpx0312/keyHive/cmd/keyhive@latest`；或在本仓库内执行 `go install ./cmd/keyhive`（安装到 `go env GOPATH`/bin）。
 
 ## 命令
 
-二进制在本仓库根目录（相对本 skill 为 `../../keyhive.exe`；本机绝对路径 `D:/Users/Desktop/AGENT-CODE/keyHive/keyhive.exe`，按仓库实际位置调整）：
-
 ```bash
-KH="D:/Users/Desktop/AGENT-CODE/keyHive/keyhive.exe"
-
 # 只读组（AI 令牌，日常用）
-"$KH" status                              # 服务连通性/令牌配置检查
-"$KH" list [--category <分类>] [--stale N]  # 列条目（遮蔽+注释）；--stale 只看超 N 天未更新
-"$KH" search <关键词> [--stale N]           # 搜索（标题/说明/分类，中英文均可）
-"$KH" get <id>                            # 单条详情（遮蔽）
-"$KH" reveal <id> <字段名>                 # 取单字段明文（记审计）
-"$KH" totp <id> [--field totp_secret]     # 生成两步验证 6 位动态码（密钥不进上下文，记审计）
+keyhive status                              # 服务连通性/令牌配置检查（首次先跑这个）
+keyhive list [--category <分类>] [--stale N]  # 列条目（遮蔽+注释）；--stale 只看超 N 天未更新
+keyhive search <关键词> [--stale N]           # 搜索（标题/说明/分类，中英文均可）
+keyhive get <id>                            # 单条详情（遮蔽）
+keyhive reveal <id> <字段名>                 # 取单字段明文（记审计）
+keyhive totp <id> [--field totp_secret]     # 生成两步验证 6 位动态码（密钥不进上下文，记审计）
 
 # admin 组（需要管理员密码：--pass 或环境变量 KEYHIVE_ADMIN_PASS）
-"$KH" add --file <条目.json>              # 录入条目（--file 留空则读 stdin）
-"$KH" edit <id> <field>=<value> [...]     # 更新字段（轮换后更新库值；见下方规则）
-"$KH" import --file <csv> --format bitwarden|chrome [--dry-run]  # 批量导入
-"$KH" export [--masked]                   # 全库导出（--masked 敏感值遮蔽）
-"$KH" rotate-key                          # 主密钥轮换（重加密全部条目）
+keyhive add --file <条目.json>              # 录入条目（--file 留空则读 stdin）
+keyhive edit <id> <field>=<value> [...]     # 更新字段（轮换后更新库值；见下方规则）
+keyhive import --file <csv> --format bitwarden|chrome [--dry-run]  # 批量导入
+keyhive export [--masked]                   # 全库导出（--masked 敏感值遮蔽）
+keyhive rotate-key                          # 主密钥轮换（重加密全部条目）
 ```
 
 reveal 返回 JSON（entry_id/entry_title/key/description/value），stdout 可直接管道取裸值，明文全程不进上下文：
 ```bash
-"$KH" reveal 1 password | jq -r .value | docker login <registry> -u <user> --password-stdin
+keyhive reveal 1 password | jq -r .value | docker login <registry> -u <user> --password-stdin
 ```
 
 edit 规则：field 限已有字段（或 title/category/description/ai_visible）；**未提及的敏感字段保留原值**（以遮蔽值回传，服务端处理，零明文暴露）；把敏感字段显式设为 `***` 会被拒绝。
@@ -50,14 +60,21 @@ edit 规则：field 限已有字段（或 title/category/description/ai_visible�
 
 ## 故障处理
 
-- 服务不可达 → 提示：`docker start keyhive`（或 `cd keyHive 目录 && docker compose up -d`）
+- 命令找不到（command not found）→ 按「安装」节安装；升级同理（下载新版本覆盖）
+- 服务不可达 → `keyhive status` 定位：实例跑在本机 Docker 就 `docker start keyhive`（或 compose 目录 `docker compose up -d`）；远程实例先确认主机可达性与 base_url 配置是否一致
 - reveal 403 或提示令牌未配置 → 指引 Web UI「AI 令牌」页创建/更新（read/search/reveal）；**totp 需要 token_read 和 token_reveal 同时配置**
 - admin 命令报"未提供管理员密码" → 需要用户以 `KEYHIVE_ADMIN_PASS` 环境变量或 `--pass` 提供（AI 不要在对话记录里留存该密码）
 - 搜不到 → 见工作流第 6 条
 
-## 配置
+## 认证与配置
 
-`~/.keyhive/config.json`（令牌由管理员在 Web UI「AI 令牌」页创建，明文仅显示一次）：
+首选 `keyhive login` 创建/更新配置（合并写入、令牌终端输入遮蔽、写前校验连通性）：
+
+```bash
+keyhive login --url http://localhost:8020 --token-read kh_... --token-reveal kh_...
+```
+
+也可手工编辑配置文件 `~/.keyhive/config.json`（路径可用 `KEYHIVE_CONFIG` 覆盖；令牌由管理员在 Web UI「AI 令牌」页创建，明文仅显示一次）：
 
 ```json
 {
@@ -67,26 +84,27 @@ edit 规则：field 限已有字段（或 title/category/description/ai_visible�
 }
 ```
 
-环境变量（对所有命令与 MCP 生效）：
+`base_url` 填实例地址：本机容器默认 `http://localhost:8020`，远程实例填对应主机端口。优先级：环境变量 > 配置文件。环境变量（对所有命令与 MCP 生效）：
+
 - `KEYHIVE_CONFIG`：覆盖配置文件路径
-- `KEYHIVE_BASE_URL`：临时指向其他实例（如 `http://192.168.0.10:8020`），不改配置文件
+- `KEYHIVE_BASE_URL`：临时指向其他实例（如 `http://<主机>:8020`），不改配置文件
 - `KEYHIVE_ADMIN_PASS`：admin 组命令的密码（避免进 shell 历史，优于 --pass）
 
 每次 reveal / totp / admin 写操作都记审计（哪个令牌、何时、动了哪条），用户可在 Web UI 审计页回查。
 
 ## MCP 接入（可选的另一种方式）
 
-`keyhive mcp` 以 stdio MCP server 运行（kh_status / kh_list / kh_search / kh_get / kh_reveal，与 CLI 同一套配置；**没有 totp/admin 工具，需要时仍走 CLI**）。配置示例：
+`keyhive mcp` 以 stdio MCP server 运行（kh_status / kh_list / kh_search / kh_get / kh_reveal，与 CLI 同一套配置；**没有 totp/admin 工具，需要时仍走 CLI**）：
 
 ```json
 {
   "mcpServers": {
     "keyhive": {
-      "command": "D:/Users/Desktop/AGENT-CODE/keyHive/keyhive.exe",
+      "command": "keyhive",
       "args": ["mcp"]
     }
   }
 }
 ```
 
-即使配了 MCP，本 skill 的行为规范（遮蔽优先、最小 reveal、不落盘）同样适用。
+若客户端不解析 PATH，把上面 `command` 换成 `command -v keyhive`（Windows `where keyhive`）输出的绝对路径。即使配了 MCP，本 skill 的行为规范（遮蔽优先、最小 reveal、不落盘）同样适用。

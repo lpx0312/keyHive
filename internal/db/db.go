@@ -9,8 +9,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"keyhive/internal/auth"
-	"keyhive/internal/templates"
+	"github.com/lpx0312/keyHive/internal/auth"
+	"github.com/lpx0312/keyHive/internal/templates"
 )
 
 // Open 打开 SQLite（WAL、外键、忙等待），并执行迁移与种子

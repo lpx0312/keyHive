@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"strings"
 
-	"keyhive/internal/aichat"
-	"keyhive/internal/audit"
-	"keyhive/internal/auth"
-	"keyhive/internal/model"
+	"github.com/lpx0312/keyHive/internal/aichat"
+	"github.com/lpx0312/keyHive/internal/audit"
+	"github.com/lpx0312/keyHive/internal/auth"
+	"github.com/lpx0312/keyHive/internal/model"
 )
 
 // settings 键
