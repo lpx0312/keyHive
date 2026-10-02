@@ -1,0 +1,20 @@
+{
+  "name": "keyhive",
+  "version": "1.2.4",
+  "description": "keyHive 密钥管家客户端 skill：从自托管密钥库查询/取用凭据——搜索条目、读字段结构与中文注释（敏感值遮蔽）、reveal 取单字段明文、totp 生成两步验证码、admin 通道录入/更新。任务需要任何凭据时自动触发（docker login、AK/SK、数据库连接、API key、SSH 等）。",
+  "author": {
+    "name": "lpx0312",
+    "url": "https://github.com/lpx0312"
+  },
+  "repository": "https://github.com/lpx0312/keyHive",
+  "license": "MIT",
+  "skills": "skills",
+  "keywords": [
+    "secrets",
+    "credentials",
+    "password-manager",
+    "totp",
+    "cli",
+    "skills"
+  ]
+}
