@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -149,5 +150,100 @@ func TestCreateUserValidation(t *testing.T) {
 	do(t, admin, "POST", base+"/users", `{"username":"dup","password":"dup-pass-123"}`)
 	if code, _ := do(t, admin, "POST", base+"/users", `{"username":"dup","password":"dup-pass-456"}`); code != 400 {
 		t.Fatalf("重复用户名应 400，实际 %d", code)
+	}
+}
+
+// 导出 → 导入 round-trip：keyHive 明文导出 JSON 应能完整恢复；
+// 遮蔽导出（敏感值 ***）必须在预览与导入两个入口都被拒绝。
+func TestImportKeyhiveRoundTrip(t *testing.T) {
+	srv, _ := newHumanServer(t)
+	defer srv.Close()
+	base := srv.URL + "/api/v1"
+	admin := client(t)
+	if code, _ := do(t, admin, "POST", base+"/auth/login", `{"username":"admin","password":"`+adminPW+`"}`); code != 200 {
+		t.Fatal("admin 登录失败")
+	}
+
+	// 预置一条含敏感字段的条目，再导出（/export 返回数组，绕过 do() 的对象解码拿原始 body）
+	entry := `{"title":"ACR","category":"docker_registry","description":"d","ai_visible":true,
+	  "fields":[{"key":"username","description":"用户名","type":"text","is_secret":false,"value":"lipanx"},
+	            {"key":"password","description":"密码","type":"text","is_secret":true,"value":"real-pw"}]}`
+	if code, out := do(t, admin, "POST", base+"/entries", entry); code != 201 {
+		t.Fatalf("建条目失败: %d %v", code, out)
+	}
+	resp, err := admin.Get(base + "/export")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exported, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("导出应 200，实际 %d", resp.StatusCode)
+	}
+
+	// 遮蔽版：敏感值替换 *** 后导入，预览与确认都应 400
+	var list []map[string]any
+	json.Unmarshal(exported, &list)
+	for _, e := range list {
+		for _, f := range e["fields"].([]any) {
+			m := f.(map[string]any)
+			if m["is_secret"] == true {
+				m["value"] = "***"
+			}
+		}
+	}
+	masked, _ := json.Marshal(list)
+	// 导出的内容是数组 JSON，须编码为 JSON 字符串放进 csv 字段
+	csvMasked, _ := json.Marshal(string(masked))
+	csvExported, _ := json.Marshal(string(exported))
+	if code, _ := do(t, admin, "POST", base+"/import",
+		`{"format":"keyhive","csv":`+string(csvMasked)+`,"dry_run":true}`); code != 400 {
+		t.Fatalf("遮蔽版预览应 400，实际 %d", code)
+	}
+	if code, _ := do(t, admin, "POST", base+"/import",
+		`{"format":"keyhive","csv":`+string(csvMasked)+`,"dry_run":false}`); code != 400 {
+		t.Fatalf("遮蔽版导入应 400，实际 %d", code)
+	}
+
+	// dry_run 预览：不落库
+	if code, out := do(t, admin, "POST", base+"/import",
+		`{"format":"keyhive","csv":`+string(csvExported)+`,"dry_run":true}`); code != 200 || out["count"].(float64) != 1 {
+		t.Fatalf("预览应 count=1: %d %v", code, out)
+	}
+
+	// 确认导入 → 再导出验证：2 条 ACR，恢复副本的敏感字段为明文原值
+	if code, out := do(t, admin, "POST", base+"/import",
+		`{"format":"keyhive","csv":`+string(csvExported)+`,"dry_run":false}`); code != 200 || out["ok"].(float64) != 1 {
+		t.Fatalf("导入应成功 1 条: %d %v", code, out)
+	}
+	resp2, err := admin.Get(base + "/export")
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+	var finalList []map[string]any
+	json.Unmarshal(after, &finalList)
+	if len(finalList) != 2 {
+		t.Fatalf("导入后应共 2 条条目，实际 %d", len(finalList))
+	}
+	restoredPw := ""
+	for _, e := range finalList {
+		if e["title"] == "ACR" && e["description"] == "d" {
+			for _, f := range e["fields"].([]any) {
+				m := f.(map[string]any)
+				if m["key"] == "password" {
+					restoredPw, _ = m["value"].(string)
+				}
+			}
+		}
+	}
+	if restoredPw != "real-pw" {
+		t.Fatalf("敏感字段明文应原样恢复，实际 %q", restoredPw)
+	}
+
+	// 垃圾 JSON 应 400
+	if code, _ := do(t, admin, "POST", base+"/import", `{"format":"keyhive","csv":"not json"}`); code != 400 {
+		t.Fatalf("非法 JSON 应 400，实际 %d", code)
 	}
 }

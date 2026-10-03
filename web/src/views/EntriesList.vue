@@ -82,23 +82,26 @@
     </el-dialog>
 
     <!-- 导入弹窗 -->
-    <el-dialog v-model="impDlg" title="导入 CSV" width="520px">
+    <el-dialog v-model="impDlg" title="导入" width="520px">
       <el-form label-width="90px">
         <el-form-item label="来源格式">
-          <el-select v-model="impFormat" style="width: 220px">
+          <el-select v-model="impFormat" style="width: 260px" @change="onImpFormatChange">
             <el-option label="Bitwarden（CSV 导出）" value="bitwarden" />
             <el-option label="Chrome / Edge（CSV 导出）" value="chrome" />
+            <el-option label="keyHive（导出 JSON，恢复备份）" value="keyhive" />
           </el-select>
         </el-form-item>
-        <el-form-item label="CSV 文件">
-          <input type="file" accept=".csv" @change="onCsvFile" />
+        <el-form-item :label="impFormat === 'keyhive' ? 'JSON 文件' : 'CSV 文件'">
+          <input type="file" accept=".csv,.json" @change="onCsvFile" />
         </el-form-item>
       </el-form>
       <div v-if="impPreview" class="imp-preview">
         <b>预览：共 {{ impPreview.count }} 条</b>
         <div v-for="(p, i) in impPreview.preview" :key="i" class="imp-row">{{ p.title }} <span class="imp-user">（{{ p.username }}）</span></div>
       </div>
-      <el-alert type="info" :closable="false" title="导入的条目归入 web_account 分类，密码/TOTP 标记敏感加密存储" />
+      <el-alert v-if="impFormat === 'keyhive'" type="warning" :closable="false"
+        title="恢复导入：条目保持原分类与字段；必须使用明文导出的 JSON，遮蔽版（***）会被拒绝" />
+      <el-alert v-else type="info" :closable="false" title="导入的条目归入 web_account 分类，密码/TOTP 标记敏感加密存储" />
       <template #footer>
         <el-button @click="impDlg = false">取消</el-button>
         <el-button :disabled="!impCsv" :loading="imping" @click="doImportPreview">预览</el-button>
@@ -206,6 +209,11 @@ const impFormat = ref('bitwarden')
 const impCsv = ref('')
 const impPreview = ref<{ count: number; preview: { title: string; username: string }[] } | null>(null)
 const imping = ref(false)
+
+function onImpFormatChange() {
+  impCsv.value = ''
+  impPreview.value = null
+}
 
 function onCsvFile(ev: Event) {
   const file = (ev.target as HTMLInputElement).files?.[0]

@@ -128,6 +128,7 @@ keyhive add --file entry.json     # 录入条目（admin 登录；密码用 --pa
 keyhive edit 3 password=NewP@ss   # 更新条目字段（admin；未提及的敏感字段保留原值；密码轮换后更新库值）
 keyhive list --stale 90           # 只看超 90 天未更新的条目（密码轮换提醒）
 keyhive import --file bitwarden.csv --format bitwarden [--dry-run]  # 从 Bitwarden/Chrome CSV 批量导入
+keyhive import --file keyhive-export.json --format keyhive [--dry-run]  # 用明文导出 JSON 恢复备份（遮蔽版会被拒绝）
 keyhive export [--masked]         # 全库导出（admin；--masked 输出遮蔽版；明文导出记审计）
 keyhive rotate-key                # 主密钥轮换：重加密全部条目+更新 key_check（admin，记审计）
 ```

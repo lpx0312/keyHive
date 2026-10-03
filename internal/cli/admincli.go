@@ -130,12 +130,12 @@ func cmdExport(cfg *Config, args []string) int {
 	return 0
 }
 
-// ---- import（Bitwarden / Chrome CSV）----
+// ---- import（Bitwarden / Chrome CSV / keyHive 导出 JSON）----
 
 func cmdImport(cfg *Config, args []string) int {
 	fs := flag.NewFlagSet("import", flag.ContinueOnError)
-	file := fs.String("file", "", "CSV 文件路径")
-	format := fs.String("format", "bitwarden", "来源格式：bitwarden | chrome")
+	file := fs.String("file", "", "导入文件路径（CSV，或 keyHive 明文导出 JSON）")
+	format := fs.String("format", "bitwarden", "来源格式：bitwarden | chrome | keyhive")
 	dryRun := fs.Bool("dry-run", false, "只预览不写入")
 	user := fs.String("user", "admin", "管理员用户名")
 	pass := fs.String("pass", "", "管理员密码（推荐环境变量 KEYHIVE_ADMIN_PASS）")
@@ -144,13 +144,16 @@ func cmdImport(cfg *Config, args []string) int {
 		*pass = strings.TrimSpace(os.Getenv("KEYHIVE_ADMIN_PASS"))
 	}
 	if *file == "" {
-		fmt.Fprintln(os.Stderr, "用法: keyhive import --file <csv> --format bitwarden|chrome [--dry-run]")
+		fmt.Fprintln(os.Stderr, "用法: keyhive import --file <csv|json> --format bitwarden|chrome|keyhive [--dry-run]")
 		return 2
 	}
 	raw, err := os.ReadFile(*file)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "错误: 读取文件失败:", err)
 		return 1
+	}
+	if strings.EqualFold(*format, "keyhive") {
+		return importKeyhive(cfg, raw, *user, *pass, *dryRun)
 	}
 	entries, err := importer.Parse(*format, raw)
 	if err != nil {
@@ -202,6 +205,47 @@ func sourceLabel(format string) string {
 	return "Chrome"
 }
 
+// importKeyhive keyHive 明文导出 JSON 的恢复导入（遮蔽版在解析层即被拒绝）
+func importKeyhive(cfg *Config, raw []byte, user, pass string, dryRun bool) int {
+	entries, err := importer.ParseKeyhive(raw)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "错误:", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "解析到 %d 条条目\n", len(entries))
+	for i := range entries {
+		if i >= 5 {
+			fmt.Fprintf(os.Stderr, "  ... 其余 %d 条略\n", len(entries)-5)
+			break
+		}
+		fmt.Fprintf(os.Stderr, "  %d. %s（%d 个字段）\n", i+1, entries[i].Title, len(entries[i].Fields))
+	}
+	if dryRun {
+		fmt.Fprintln(os.Stderr, "dry-run：未写入任何数据")
+		return 0
+	}
+	if pass == "" {
+		fmt.Fprintln(os.Stderr, "错误: 未提供管理员密码（--pass 或环境变量 KEYHIVE_ADMIN_PASS）")
+		return 1
+	}
+	ok, fail := 0, 0
+	for i := range entries {
+		body, _ := json.Marshal(entries[i])
+		data, code, err := AddEntry(cfg, user, pass, body)
+		if err != nil || code != 201 {
+			fail++
+			fmt.Fprintf(os.Stderr, "  ❌ %s: %s\n", entries[i].Title, errOrBody(err, data))
+			continue
+		}
+		ok++
+	}
+	fmt.Fprintf(os.Stderr, "导入完成：成功 %d / 失败 %d（每条已记审计）\n", ok, fail)
+	if fail > 0 {
+		return 1
+	}
+	return 0
+}
+
 func errOrBody(err error, data []byte) string {
 	if err != nil {
 		return err.Error()
@@ -228,9 +272,9 @@ func cmdRotateKey(cfg *Config, args []string) int {
 	}
 	printJSON(data)
 	var res struct {
-		Entries       int    `json:"entries"`
-		KeyFile       string `json:"key_file"`
-		NewMasterKey  string `json:"new_master_key"`
+		Entries      int    `json:"entries"`
+		KeyFile      string `json:"key_file"`
+		NewMasterKey string `json:"new_master_key"`
 	}
 	json.Unmarshal(data, &res)
 	fmt.Fprintf(os.Stderr, "✅ 已用新主密钥重加密 %d 条条目并更新 key_check（已记审计）\n", res.Entries)

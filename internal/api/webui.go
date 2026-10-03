@@ -62,8 +62,8 @@ func (s *Server) genTOTP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"code": code, "remaining": remain, "period": 30})
 }
 
-// importCSV Web 端 CSV 导入（admin）：dry_run 预览，否则逐条入库
-// POST /import  body: {"format":"bitwarden|chrome","csv":"...","dry_run":bool}
+// importCSV Web 端 CSV / keyHive JSON 导入（admin）：dry_run 预览，否则逐条入库
+// POST /import  body: {"format":"bitwarden|chrome|keyhive","csv":"<文件内容>","dry_run":bool}
 func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Format string `json:"format"`
@@ -72,6 +72,10 @@ func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := readBody(r, &req); err != nil || req.CSV == "" {
 		writeErr(w, 400, "请求体应为 {format, csv, dry_run}")
+		return
+	}
+	if strings.EqualFold(req.Format, "keyhive") {
+		s.importKeyhive(w, r, req.CSV, req.DryRun)
 		return
 	}
 	entries, err := importer.Parse(req.Format, []byte(req.CSV))
@@ -109,6 +113,41 @@ func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 	}
 	audit.Log(s.Store.DB, "user", uid, uname, model.ActionImport, nil,
 		fmt.Sprintf(`{"source":"%s","ok":%d,"fail":%d}`, source, ok, len(fail)), clientIP(r))
+	writeJSON(w, 200, map[string]any{"ok": ok, "fail": fail})
+}
+
+// importKeyhive keyHive 原生导出 JSON 的恢复导入（admin）：条目保持原分类/字段原样入库
+func (s *Server) importKeyhive(w http.ResponseWriter, r *http.Request, content string, dryRun bool) {
+	entries, err := importer.ParseKeyhive([]byte(content))
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if dryRun {
+		preview := make([]map[string]string, 0, len(entries))
+		for i := range entries {
+			if i >= 20 {
+				break
+			}
+			preview = append(preview, map[string]string{
+				"title":    entries[i].Title,
+				"username": importer.KeyhiveUsername(&entries[i]),
+			})
+		}
+		writeJSON(w, 200, map[string]any{"count": len(entries), "preview": preview})
+		return
+	}
+	uid, uname := s.actor(r)
+	ok, fail := 0, []string{}
+	for i := range entries {
+		if err := s.Store.CreateEntry(&entries[i]); err != nil {
+			fail = append(fail, entries[i].Title+"（"+err.Error()+"）")
+			continue
+		}
+		ok++
+	}
+	audit.Log(s.Store.DB, "user", uid, uname, model.ActionImport, nil,
+		fmt.Sprintf(`{"source":"keyHive","ok":%d,"fail":%d}`, ok, len(fail)), clientIP(r))
 	writeJSON(w, 200, map[string]any{"ok": ok, "fail": fail})
 }
 

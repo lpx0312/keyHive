@@ -35,7 +35,8 @@ keyhive totp <id> [--field totp_secret]     # 生成两步验证 6 位动态码�
 # admin 组（需要管理员密码：--pass 或环境变量 KEYHIVE_ADMIN_PASS）
 keyhive add --file <条目.json>              # 录入条目（--file 留空则读 stdin）
 keyhive edit <id> <field>=<value> [...]     # 更新字段（轮换后更新库值；见下方规则）
-keyhive import --file <csv> --format bitwarden|chrome [--dry-run]  # 批量导入
+keyhive import --file <csv> --format bitwarden|chrome [--dry-run]   # 批量导入（Bitwarden/Chrome CSV）
+keyhive import --file <json> --format keyhive [--dry-run]   # 恢复备份（keyHive 明文导出 JSON；遮蔽版会被拒绝）
 keyhive export [--masked]                   # 全库导出（--masked 敏感值遮蔽）
 keyhive rotate-key                          # 主密钥轮换（重加密全部条目）
 ```
