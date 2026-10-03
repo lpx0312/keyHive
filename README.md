@@ -15,20 +15,52 @@
 
 ## 快速开始
 
-### Docker（推荐）
+### Docker Compose（源码本地构建）
 
 ```bash
 docker compose up -d --build
 # 国内网络：docker compose build --build-arg USE_CN_MIRROR=1 && docker compose up -d
 ```
 
-打开 `http://<主机>:8020`。**首次启动的初始密码打印在容器日志里**：
+### Docker Run（群晖 NAS 等免构建场景）
+
+镜像已发布到阿里云 ACR（多架构，amd64/arm64 均有，适配常见群晖机型）。SSH 进 NAS 执行（存储空间路径按实际调整）：
+
+```bash
+docker pull registry.cn-hangzhou.aliyuncs.com/lpx03/keyhive:latest
+
+docker run -d \
+  --name keyhive \
+  --restart unless-stopped \
+  -p 8020:8020 \
+  -v /volume1/docker/keyhive:/app/data \
+  -e TZ=Asia/Shanghai \
+  registry.cn-hangzhou.aliyuncs.com/lpx03/keyhive:latest
+```
+
+- 数据（库 + 密钥）全在 `/volume1/docker/keyhive`，备份拷贝该目录即可
+- 可选 `-e KEYHIVE_MASTER_KEY='任意字符串'`：固定主密钥；不填则自动生成并存入数据卷
+- 群晖不开 SSH 时：先在任意有 Docker 的机器 `docker pull` 后 `docker save` 导出 tar，到群晖 Container Manager「映像」导入，再按上述参数运行（端口 `8020`、卷 `/volume1/docker/keyhive` → `/app/data`、时区 `Asia/Shanghai`）
+
+### 首次启动
+
+打开 `http://<主机>:8020`。**初始密码打印在容器日志里**（Compose 与 Docker Run 通用）：
 
 ```bash
 docker logs keyhive 2>&1 | grep 初始密码
 ```
 
 登录后立即在「设置」改密码。
+
+### 升级（Docker Run 方式）
+
+```bash
+docker pull registry.cn-hangzhou.aliyuncs.com/lpx03/keyhive:latest
+docker stop keyhive && docker rm keyhive
+# 重新执行上面的 docker run 命令；数据卷不删则数据无损
+```
+
+需要回滚时把 `latest` 换成固定版本号（如 `1.2.5`）。
 
 ### 裸机
 
@@ -146,5 +178,3 @@ cd web && npm run dev  # 前端开发服（代理 /api 到 :8020）
 ## 路线图
 
 已全部落地：MCP server、导入导出、密钥轮换、TOTP、轮换提醒、CSV 导入、版本注入。暂缓项：登录防爆破（内网部署暂缓；暴露公网时必做）、会话管理页、CLI delete。
-
-MCP server 子命令（`keyhive mcp` stdio）、导入导出、密钥轮换。
