@@ -331,3 +331,72 @@ func TestTemplateLifecycle(t *testing.T) {
 		t.Fatalf("删除自建模板应 200，实际 %d", code)
 	}
 }
+
+// 标签 round-trip + 搜索覆盖：q 应能命中 fields 里的 URL 等非敏感值与 tags
+func TestTagsAndSearch(t *testing.T) {
+	srv, _ := newHumanServer(t)
+	defer srv.Close()
+	base := srv.URL + "/api/v1"
+	admin := client(t)
+	if code, _ := do(t, admin, "POST", base+"/auth/login", `{"username":"admin","password":"`+adminPW+`"}`); code != 200 {
+		t.Fatal("admin 登录失败")
+	}
+
+	body := `{"title":"内网Git","category":"web_account","description":"d","ai_visible":true,
+	  "tags":["公司内网"," 数据库 ","公司内网",""],
+	  "fields":[{"key":"url","description":"地址","type":"url","is_secret":false,"value":"https://git.corp.local"},
+	            {"key":"password","description":"密码","type":"text","is_secret":true,"value":"pw-123"}]}`
+	if code, out := do(t, admin, "POST", base+"/entries", body); code != 201 {
+		t.Fatalf("建条目应 201: %d %v", code, out)
+	}
+
+	// 单条读回：tags 归一化（去空、trim、去重）且原样保留
+	code, one := do(t, admin, "GET", base+"/entries/1", "")
+	if code != 200 {
+		t.Fatalf("读单条应 200: %d", code)
+	}
+	got, _ := one["tags"].([]any)
+	if len(got) != 2 || got[0] != "公司内网" || got[1] != "数据库" {
+		t.Fatalf("tags 应归一化为 [公司内网 数据库]: %v", one["tags"])
+	}
+
+	// 搜索命中 URL 字段值
+	_, list := doGet(t, admin, base+"/entries?q=git.corp.local")
+	if len(list) != 1 {
+		t.Fatalf("q=URL 应命中 1 条: %d", len(list))
+	}
+	// 搜索命中标签
+	_, list = doGet(t, admin, base+"/entries?q=%E5%85%AC%E5%8F%B8%E5%86%85%E7%BD%91")
+	if len(list) != 1 {
+		t.Fatalf("q=标签(公司内网) 应命中 1 条: %d", len(list))
+	}
+	// 敏感值不应可搜
+	_, list = doGet(t, admin, base+"/entries?q=pw-123")
+	if len(list) != 0 {
+		t.Fatalf("敏感字段明文不应可搜索: %d", len(list))
+	}
+
+	// 更新 tags
+	if code, _ := do(t, admin, "PUT", base+"/entries/1",
+		`{"title":"内网Git","category":"web_account","description":"d","ai_visible":true,
+		  "tags":["公网"],"fields":[{"key":"url","description":"地址","type":"url","is_secret":false,"value":"https://git.corp.local"}]}`); code != 200 {
+		t.Fatal("更新应 200")
+	}
+	_, list = doGet(t, admin, base+"/entries?q=%E5%85%AC%E7%BD%91")
+	if len(list) != 1 {
+		t.Fatal("更新后应命中新标签 公网")
+	}
+}
+
+// doGet 原始 GET 并解 JSON 数组
+func doGet(t *testing.T, c *http.Client, url string) (int, []any) {
+	t.Helper()
+	resp, err := c.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var list []any
+	json.NewDecoder(resp.Body).Decode(&list)
+	return resp.StatusCode, list
+}

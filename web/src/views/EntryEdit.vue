@@ -35,6 +35,15 @@
               <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
             </el-select>
           </el-form-item>
+          <el-form-item label="标签">
+            <div class="tags-box">
+              <el-tag v-for="tag in form.tags || []" :key="tag" closable @close="form.tags = (form.tags || []).filter((t) => t !== tag)">{{ tag }}</el-tag>
+              <el-input v-if="tagInputVisible" ref="tagInputRef" v-model="tagInputValue" size="small" style="width: 110px"
+                placeholder="回车确认" @keyup.enter="addTag" @blur="addTag" />
+              <el-button v-else size="small" @click="showTagInput">＋ 标签</el-button>
+            </div>
+            <span class="hint" style="margin-left: 8px">如：内网 / 公司内网 / 公网，列表可按标签筛选</span>
+          </el-form-item>
           <el-form-item label="条目说明">
             <el-input v-model="form.description" type="textarea" :rows="2"
               placeholder="这条凭据是干嘛的、在哪个环境用 —— 给 AI 看的上下文，强烈建议填写" />
@@ -86,7 +95,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
@@ -109,7 +118,7 @@ const templates = ref<Template[]>([])
 const categories = ref<string[]>([])
 
 function blankEntry(): Entry {
-  return { id: 0, title: '', category: '', description: '', ai_visible: true, fields: [], created_at: '', updated_at: '' }
+  return { id: 0, title: '', category: '', description: '', tags: [], ai_visible: true, fields: [], created_at: '', updated_at: '' }
 }
 
 const groupedTemplates = computed(() => {
@@ -119,6 +128,21 @@ const groupedTemplates = computed(() => {
 })
 
 const missingDesc = computed(() => form.value.fields.filter((f) => !f.description.trim()).length)
+
+// ---- 标签输入（回车/失焦确认，去重） ----
+const tagInputVisible = ref(false)
+const tagInputValue = ref('')
+const tagInputRef = ref()
+function showTagInput() {
+  tagInputVisible.value = true
+  nextTick(() => tagInputRef.value?.focus())
+}
+function addTag() {
+  const v = tagInputValue.value.trim()
+  if (v && !(form.value.tags || []).includes(v)) form.value.tags = [...(form.value.tags || []), v]
+  tagInputVisible.value = false
+  tagInputValue.value = ''
+}
 
 function applyTemplate(t: Template) {
   form.value.category = t.category === 'blank' ? '' : t.category
@@ -144,6 +168,7 @@ async function load() {
     if (!isCreate) {
       // 编辑时直接取明文（服务端已记 entry_reveal 审计）
       form.value = await api(`/entries/${id}?reveal=true`)
+      if (!form.value.tags) form.value.tags = []
     }
   } catch (e: any) {
     ElMessage.error(e.message)
@@ -238,4 +263,6 @@ onMounted(load)
 /* 移动端：字段卡片（字段名+类型一行，值/说明/操作各占整行） */
 .field-row-m { display: grid; grid-template-columns: 58% 1fr; gap: 6px; border: 1px solid #e4e7ed; border-radius: 8px; padding: 10px; margin-bottom: 10px; background: #fafbfc; }
 .field-row-m .c-val, .field-row-m .c-desc, .field-row-m .field-ops { grid-column: 1 / -1; }
+
+.tags-box { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 </style>

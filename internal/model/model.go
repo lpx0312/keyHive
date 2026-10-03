@@ -4,9 +4,9 @@ import "strings"
 
 // 字段类型
 const (
- FieldTypeText     = "text"
- FieldTypeURL      = "url"
- FieldTypeMultiline = "multiline"
+	FieldTypeText      = "text"
+	FieldTypeURL       = "url"
+	FieldTypeMultiline = "multiline"
 )
 
 // Field 条目自定义字段：数量任意，Description 为给 AI 看的说明
@@ -41,14 +41,30 @@ func (f *Field) Normalize() {
 
 // Entry 一条密钥条目
 type Entry struct {
-	ID          int64   `json:"id"`
-	Title       string  `json:"title"`
-	Category    string  `json:"category"`
-	Description string  `json:"description"`
-	AIVisible   bool    `json:"ai_visible"`
-	Fields      []Field `json:"fields"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID          int64    `json:"id"`
+	Title       string   `json:"title"`
+	Category    string   `json:"category"`
+	Description string   `json:"description"`
+	Tags        []string `json:"tags,omitempty"` // 自由标签（如 内网/公司内网/公网），与 category 类型维度正交
+	AIVisible   bool     `json:"ai_visible"`
+	Fields      []Field  `json:"fields"`
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
+}
+
+// normalizeTags 标签去空、去首尾空白、去重，保持顺序
+func normalizeTags(tags []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	return out
 }
 
 // FieldByKey 按字段名查找
@@ -75,6 +91,7 @@ func (e *Entry) Validate() string {
 	e.Title = strings.TrimSpace(e.Title)
 	e.Category = strings.TrimSpace(e.Category)
 	e.Description = strings.TrimSpace(e.Description)
+	e.Tags = normalizeTags(e.Tags)
 	if e.Title == "" {
 		return "标题不能为空"
 	}
@@ -170,10 +187,10 @@ const (
 	ActionUserCreate   = "user_create"
 	ActionUserUpdate   = "user_update"
 	ActionUserDelete   = "user_delete"
-	ActionExport       = "export"      // 全库明文导出（admin）
-	ActionKeyRotate    = "key_rotate"  // 主密钥轮换（admin）
-	ActionTOTPGen      = "totp_gen"    // 生成两步验证动态码
-	ActionImport       = "import"      // CSV 批量导入（admin）
+	ActionExport       = "export"     // 全库明文导出（admin）
+	ActionKeyRotate    = "key_rotate" // 主密钥轮换（admin）
+	ActionTOTPGen      = "totp_gen"   // 生成两步验证动态码
+	ActionImport       = "import"     // CSV 批量导入（admin）
 )
 
 // User 登录账号

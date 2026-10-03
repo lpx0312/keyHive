@@ -6,6 +6,9 @@
         <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
       </el-select>
       <el-button type="primary" @click="$router.push('/entries/new')">＋ 新建条目</el-button>
+      <el-select v-model="tagFilter" placeholder="按标签筛选" clearable style="width: 140px">
+        <el-option v-for="t in allTags" :key="t" :label="t" :value="t" />
+      </el-select>
       <el-button v-if="me.isAdmin" @click="impDlg = true">导入</el-button>
       <el-button v-if="me.isAdmin" @click="expDlg = true">导出</el-button>
       <el-button v-if="sel.length" type="danger" :loading="batchDeling" @click="batchDel">🗑 删除选中（{{ sel.length }}）</el-button>
@@ -14,15 +17,19 @@
     <!-- 移动端：卡片列表 -->
     <div v-if="isMobile" v-loading="loading" class="cards">
       <el-empty v-if="!loading && !entries.length" description="暂无条目" />
-      <el-card v-for="row in entries" :key="row.id" class="card" shadow="hover" @click="open(row)">
+      <el-card v-for="row in filtered" :key="row.id" class="card" shadow="hover" @click="open(row)">
         <div class="card-head">
           <b>{{ row.title }}</b>
           <el-tag v-if="!row.ai_visible" size="small" type="warning">AI 不可见</el-tag>
         </div>
         <div class="card-meta">
           <el-tag size="small">{{ row.category }}</el-tag>
+          <el-tag v-for="t in row.tags || []" :key="t" size="small" type="info" effect="plain">{{ t }}</el-tag>
           <span class="card-fields">{{ row.fields.length }} 字段<template v-if="secretCount(row)"> · 🔒{{ secretCount(row) }}</template></span>
           <span v-if="isStale(row.updated_at)" class="stale">⚠️ {{ daysSince(row.updated_at) }} 天未更新</span>
+        </div>
+        <div v-if="entryURL(row)" class="card-url">
+          🔗 <a :href="entryURL(row)!.href" target="_blank" rel="noopener">{{ entryURL(row)!.text }}</a>
         </div>
         <div v-if="row.description" class="card-desc">{{ row.description }}</div>
         <div class="card-actions">
@@ -33,20 +40,30 @@
     </div>
 
     <!-- 桌面：表格 -->
-    <el-table v-else :data="entries" v-loading="loading" @row-click="open" @selection-change="sel = $event">
+    <el-table v-else :data="filtered" v-loading="loading" @row-click="open" @selection-change="sel = $event">
       <el-table-column type="selection" width="42" />
       <el-table-column prop="title" label="标题" min-width="180">
         <template #default="{ row }">
           <b>{{ row.title }}</b>
           <el-tag v-if="!row.ai_visible" size="small" type="warning" style="margin-left: 6px">AI 不可见</el-tag>
+          <div v-if="row.tags?.length" class="tag-row">
+            <el-tag v-for="t in row.tags" :key="t" size="small" type="info" effect="plain">{{ t }}</el-tag>
+          </div>
         </template>
       </el-table-column>
-      <el-table-column prop="category" label="分类" width="150">
+      <el-table-column prop="category" label="分类" width="130">
         <template #default="{ row }">
           <el-tag size="small">{{ row.category }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="description" label="说明" min-width="200" show-overflow-tooltip />
+      <el-table-column label="地址" min-width="150" show-overflow-tooltip>
+        <template #default="{ row }">
+          <a v-if="entryURL(row)" class="url-link" :href="entryURL(row)!.href" target="_blank" rel="noopener"
+            :title="entryURL(row)!.text">{{ entryURL(row)!.text }}</a>
+          <span v-else class="no-url">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="description" label="说明" min-width="180" show-overflow-tooltip />
       <el-table-column label="字段" width="80">
         <template #default="{ row }">
           {{ row.fields.length }} 个<el-tooltip content="含敏感字段数"><span v-if="secretCount(row)" class="sec">（🔒{{ secretCount(row) }}）</span></el-tooltip>
@@ -114,7 +131,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, Entry } from '../api'
@@ -125,6 +142,25 @@ const router = useRouter()
 const isMobile = useIsMobile()
 const entries = ref<Entry[]>([])
 const categories = ref<string[]>([])
+
+// ---- 标签筛选（本地过滤）与 URL 提取展示 ----
+const tagFilter = ref('')
+const allTags = computed(() => [...new Set(entries.value.flatMap((e) => e.tags || []))])
+const filtered = computed(() =>
+  tagFilter.value ? entries.value.filter((e) => (e.tags || []).includes(tagFilter.value)) : entries.value)
+
+// 列表 URL 提取：优先 type=url 的非敏感字段，其次按常见 key 名匹配；敏感/遮蔽值不渲染
+const URL_KEYS = new Set(['url', 'uri', 'registry', 'registry_url', 'address', 'endpoint', 'api_server',
+  'api_url', 'console_url', 'login_url', 'host', 'hostname', 'domain', 'site', 'web', 'docs'])
+function entryURL(e: Entry): { text: string; href: string } | null {
+  const fs = e.fields || []
+  let f = fs.find((f) => f.type === 'url' && !f.is_secret && f.value)
+  if (!f) f = fs.find((f) => !f.is_secret && f.value && URL_KEYS.has(f.key.toLowerCase()))
+  if (!f || f.value === '***') return null
+  const text = f.value.trim()
+  const href = /^https?:\/\//i.test(text) ? text : 'https://' + text
+  return { text, href }
+}
 const q = ref('')
 const category = ref('')
 const loading = ref(false)
@@ -322,4 +358,11 @@ onMounted(() => { load(); loadStaleDays() })
   .toolbar { flex-wrap: wrap; }
   .toolbar .el-input, .toolbar .el-select { width: 100% !important; }
 }
+
+.url-link { color: #2563eb; text-decoration: none; }
+.url-link:hover { text-decoration: underline; }
+.no-url { color: #cbd5e1; }
+.tag-row { margin-top: 2px; display: flex; gap: 4px; flex-wrap: wrap; }
+.card-url { font-size: 12px; margin: 4px 0 2px; }
+.card-url a { color: #2563eb; text-decoration: none; word-break: break-all; }
 </style>

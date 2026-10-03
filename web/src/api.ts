@@ -28,6 +28,7 @@ export interface Entry {
   id: number
   title: string
   category: string
+  tags?: string[]
   description: string
   ai_visible: boolean
   fields: Field[]

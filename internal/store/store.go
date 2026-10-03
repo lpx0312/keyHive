@@ -76,18 +76,22 @@ func (s *Store) decryptFields(raw string) ([]model.Field, error) {
 	return fields, nil
 }
 
-const entryCols = `id, title, category, description, fields, ai_visible, created_at, updated_at`
+const entryCols = `id, title, category, description, fields, tags, ai_visible, created_at, updated_at`
 
 func (s *Store) scanEntry(row interface{ Scan(...any) error }) (*model.Entry, error) {
 	var e model.Entry
-	var fieldsJSON string
+	var fieldsJSON, tagsJSON string
 	var aiVisible int
-	if err := row.Scan(&e.ID, &e.Title, &e.Category, &e.Description, &fieldsJSON, &aiVisible, &e.CreatedAt, &e.UpdatedAt); err != nil {
+	if err := row.Scan(&e.ID, &e.Title, &e.Category, &e.Description, &fieldsJSON, &tagsJSON, &aiVisible, &e.CreatedAt, &e.UpdatedAt); err != nil {
 		return nil, err
 	}
 	e.AIVisible = aiVisible == 1
 	var err error
 	e.Fields, err = s.decryptFields(fieldsJSON)
+	if err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal([]byte(tagsJSON), &e.Tags)
 	return &e, err
 }
 
@@ -113,15 +117,16 @@ func (s *Store) CreateEntry(e *model.Entry) error {
 	if err != nil {
 		return err
 	}
+	tagsJSON, _ := json.Marshal(e.Tags)
 	now := nowUTC()
 	aiVis := 0
 	if e.AIVisible {
 		aiVis = 1
 	}
 	res, err := s.DB.Exec(
-		`INSERT INTO entries (title, category, description, fields, ai_visible, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		e.Title, e.Category, e.Description, fieldsJSON, aiVis, now, now)
+		`INSERT INTO entries (title, category, description, fields, tags, ai_visible, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.Title, e.Category, e.Description, fieldsJSON, string(tagsJSON), aiVis, now, now)
 	if err != nil {
 		return err
 	}
@@ -151,13 +156,14 @@ func (s *Store) UpdateEntry(id int64, e *model.Entry) error {
 	if err != nil {
 		return err
 	}
+	tagsJSON, _ := json.Marshal(e.Tags)
 	aiVis := 0
 	if e.AIVisible {
 		aiVis = 1
 	}
 	_, err = s.DB.Exec(
-		`UPDATE entries SET title=?, category=?, description=?, fields=?, ai_visible=?, updated_at=? WHERE id=?`,
-		e.Title, e.Category, e.Description, fieldsJSON, aiVis, nowUTC(), id)
+		`UPDATE entries SET title=?, category=?, description=?, fields=?, tags=?, ai_visible=?, updated_at=? WHERE id=?`,
+		e.Title, e.Category, e.Description, fieldsJSON, string(tagsJSON), aiVis, nowUTC(), id)
 	return err
 }
 
@@ -178,9 +184,10 @@ func (s *Store) ListEntries(q, category string) ([]model.Entry, error) {
 	sb.WriteString(`SELECT ` + entryCols + ` FROM entries WHERE 1=1`)
 	args := []any{}
 	if q != "" {
-		sb.WriteString(` AND (title LIKE ? OR description LIKE ? OR category LIKE ?)`)
+		// fields 是 JSON 文本：非敏感值（含 URL/用户名等）明文可 LIKE，敏感值是密文天然搜不到
+		sb.WriteString(` AND (title LIKE ? OR description LIKE ? OR category LIKE ? OR fields LIKE ? OR tags LIKE ?)`)
 		like := "%" + q + "%"
-		args = append(args, like, like, like)
+		args = append(args, like, like, like, like, like)
 	}
 	if category != "" {
 		sb.WriteString(` AND category = ?`)

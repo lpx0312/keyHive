@@ -34,7 +34,7 @@ func Open(path string) (*sql.DB, error) {
 
 func migrate(d *sql.DB) error {
 	stmts := []string{
-	`CREATE TABLE IF NOT EXISTS users (
+		`CREATE TABLE IF NOT EXISTS users (
 		id            INTEGER PRIMARY KEY AUTOINCREMENT,
 		username      TEXT NOT NULL UNIQUE,
 		password_hash TEXT NOT NULL,
@@ -68,6 +68,7 @@ func migrate(d *sql.DB) error {
 			category    TEXT NOT NULL DEFAULT 'misc',
 			description TEXT NOT NULL DEFAULT '',
 			fields      TEXT NOT NULL DEFAULT '[]',
+			tags        TEXT NOT NULL DEFAULT '[]',
 			ai_visible  INTEGER NOT NULL DEFAULT 1,
 			created_at  TEXT NOT NULL,
 			updated_at  TEXT NOT NULL
@@ -106,6 +107,9 @@ func migrate(d *sql.DB) error {
 		}
 	}
 	if err := migrateUsersColumns(d); err != nil {
+		return err
+	}
+	if err := migrateEntriesColumns(d); err != nil {
 		return err
 	}
 	return seed(d)
@@ -154,6 +158,35 @@ func migrateUsersColumns(d *sql.DB) error {
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
 			log.Printf("迁移：已将现有用户提升为管理员")
+		}
+	}
+	return nil
+}
+
+// migrateEntriesColumns 旧库幂等补列（v1.3.1 加 tags 自由标签）
+func migrateEntriesColumns(d *sql.DB) error {
+	existing := map[string]bool{}
+	rows, err := d.Query(`pragma table_info(entries)`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dfltValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		existing[name] = true
+	}
+	rows.Close()
+
+	if !existing["tags"] {
+		if _, err := d.Exec(`ALTER TABLE entries ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'`); err != nil {
+			return fmt.Errorf("补列 tags 失败: %w", err)
 		}
 	}
 	return nil

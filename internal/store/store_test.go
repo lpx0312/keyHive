@@ -37,6 +37,7 @@ var testSchema = []string{
 		category TEXT NOT NULL DEFAULT 'misc',
 		description TEXT NOT NULL DEFAULT '',
 		fields TEXT NOT NULL DEFAULT '[]',
+		tags TEXT NOT NULL DEFAULT '[]',
 		ai_visible INTEGER NOT NULL DEFAULT 1,
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
