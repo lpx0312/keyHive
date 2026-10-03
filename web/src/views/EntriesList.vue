@@ -211,16 +211,20 @@ const impPreview = ref<{ count: number; preview: { title: string; username: stri
 const imping = ref(false)
 
 function onImpFormatChange() {
-  // 仅作废旧格式的预览；文件内容保留（文件名仍在输入框，数据必须一致），
-  // 格式与内容不匹配时由后端解析报错兜底
+  // 作废旧预览；已选文件时按新格式自动重新预览（格式不匹配由后端报错兜底）
   impPreview.value = null
+  if (impCsv.value) doImportPreview()
 }
 
 function onCsvFile(ev: Event) {
   const file = (ev.target as HTMLInputElement).files?.[0]
   if (!file) { impCsv.value = ''; impPreview.value = null; return }
   const reader = new FileReader()
-  reader.onload = () => { impCsv.value = String(reader.result || ''); impPreview.value = null }
+  reader.onload = () => {
+    impCsv.value = String(reader.result || '')
+    impPreview.value = null
+    if (impCsv.value) doImportPreview() // 选完文件自动预览，无需手动点
+  }
   reader.readAsText(file)
 }
 
