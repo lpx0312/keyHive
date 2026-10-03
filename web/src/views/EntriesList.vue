@@ -211,7 +211,8 @@ const impPreview = ref<{ count: number; preview: { title: string; username: stri
 const imping = ref(false)
 
 function onImpFormatChange() {
-  impCsv.value = ''
+  // 仅作废旧格式的预览；文件内容保留（文件名仍在输入框，数据必须一致），
+  // 格式与内容不匹配时由后端解析报错兜底
   impPreview.value = null
 }
 
