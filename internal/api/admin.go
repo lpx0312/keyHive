@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -36,6 +37,9 @@ func (s *Server) createTemplate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
+	uid, _ := auth.UserID(r.Context())
+	audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionTemplateSave, nil,
+		`{"template":"`+t.Name+`"}`, clientIP(r))
 	writeJSON(w, 201, t)
 }
 
@@ -56,6 +60,9 @@ func (s *Server) updateTemplate(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(in.Group) != "" {
 		t.Group = strings.TrimSpace(in.Group)
 	}
+	if strings.TrimSpace(in.Category) != "" {
+		t.Category = strings.TrimSpace(in.Category)
+	}
 	if in.Fields != nil {
 		t.Fields = in.Fields
 	}
@@ -63,6 +70,9 @@ func (s *Server) updateTemplate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
+	uid, _ := auth.UserID(r.Context())
+	audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionTemplateSave, nil,
+		`{"template":"`+t.Name+`","id":`+fmt.Sprintf("%d", t.ID)+`}`, clientIP(r))
 	writeJSON(w, 200, t)
 }
 

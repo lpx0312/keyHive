@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -54,6 +55,23 @@ func do(t *testing.T, c *http.Client, method, url, body string) (int, map[string
 	var out map[string]any
 	json.NewDecoder(resp.Body).Decode(&out)
 	return resp.StatusCode, out
+}
+
+// getJSON GET 数组/对象响应并解码（do() 只能解对象，/export /templates /entries 均返回数组）
+func getJSON(t *testing.T, c *http.Client, url string) any {
+	t.Helper()
+	resp, err := c.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET %s 应 200，实际 %d", url, resp.StatusCode)
+	}
+	var v any
+	json.Unmarshal(b, &v)
+	return v
 }
 
 func TestUserManagementLifecycle(t *testing.T) {
@@ -245,5 +263,71 @@ func TestImportKeyhiveRoundTrip(t *testing.T) {
 	// 垃圾 JSON 应 400
 	if code, _ := do(t, admin, "POST", base+"/import", `{"format":"keyhive","csv":"not json"}`); code != 400 {
 		t.Fatalf("非法 JSON 应 400，实际 %d", code)
+	}
+}
+
+// 模板管理生命周期：自建模板增改删 + 内置模板允许编辑、禁止删除（新增/编辑均记审计）
+func TestTemplateLifecycle(t *testing.T) {
+	srv, _ := newHumanServer(t)
+	defer srv.Close()
+	base := srv.URL + "/api/v1"
+	admin := client(t)
+	if code, _ := do(t, admin, "POST", base+"/auth/login", `{"username":"admin","password":"`+adminPW+`"}`); code != 200 {
+		t.Fatal("admin 登录失败")
+	}
+
+	// 新建
+	body := `{"name":"测试库tpl","group":"我的模板","category":"test_db","fields":[
+	  {"key":"host","description":"地址","type":"text","is_secret":false},
+	  {"key":"password","description":"密码","type":"text","is_secret":true}]}`
+	if code, out := do(t, admin, "POST", base+"/templates", body); code != 201 {
+		t.Fatalf("新建模板应 201: %d %v", code, out)
+	}
+	var created map[string]any
+	for _, tpl := range getJSON(t, admin, base+"/templates").([]any) {
+		if tpl.(map[string]any)["name"] == "测试库tpl" {
+			created = tpl.(map[string]any)
+		}
+	}
+	if created == nil {
+		t.Fatal("新建模板应出现在列表")
+	}
+	id := fmt.Sprintf("%.0f", created["id"].(float64))
+
+	// 编辑：改字段骨架
+	upd := `{"name":"测试库tpl-v2","fields":[{"key":"host","description":"新地址说明","type":"text","is_secret":false}]}`
+	if code, out := do(t, admin, "PUT", base+"/templates/"+id, upd); code != 200 {
+		t.Fatalf("编辑模板应 200: %d %v", code, out)
+	}
+	for _, tpl := range getJSON(t, admin, base+"/templates").([]any) {
+		m := tpl.(map[string]any)
+		if m["id"] == created["id"] {
+			if m["name"] != "测试库tpl-v2" || len(m["fields"].([]any)) != 1 {
+				t.Fatalf("编辑未生效: %v", m)
+			}
+		}
+	}
+
+	// 内置模板：允许编辑、禁止删除
+	var builtinID string
+	for _, tpl := range getJSON(t, admin, base+"/templates").([]any) {
+		if tpl.(map[string]any)["builtin"] == true {
+			builtinID = fmt.Sprintf("%.0f", tpl.(map[string]any)["id"].(float64))
+			break
+		}
+	}
+	if builtinID == "" {
+		t.Fatal("应存在内置模板")
+	}
+	if code, _ := do(t, admin, "PUT", base+"/templates/"+builtinID, `{"name":"内置改名测试"}`); code != 200 {
+		t.Fatalf("内置模板应可编辑，实际 %d", code)
+	}
+	if code, out := do(t, admin, "DELETE", base+"/templates/"+builtinID, ""); code != 400 {
+		t.Fatalf("内置模板删除应 400: %d %v", code, out)
+	}
+
+	// 自建删除
+	if code, _ := do(t, admin, "DELETE", base+"/templates/"+id, ""); code != 200 {
+		t.Fatalf("删除自建模板应 200，实际 %d", code)
 	}
 }

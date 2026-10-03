@@ -8,6 +8,7 @@
       <el-button type="primary" @click="$router.push('/entries/new')">＋ 新建条目</el-button>
       <el-button v-if="me.isAdmin" @click="impDlg = true">导入</el-button>
       <el-button v-if="me.isAdmin" @click="expDlg = true">导出</el-button>
+      <el-button v-if="sel.length" type="danger" :loading="batchDeling" @click="batchDel">🗑 删除选中（{{ sel.length }}）</el-button>
     </div>
 
     <!-- 移动端：卡片列表 -->
@@ -32,7 +33,8 @@
     </div>
 
     <!-- 桌面：表格 -->
-    <el-table v-else :data="entries" v-loading="loading" @row-click="open">
+    <el-table v-else :data="entries" v-loading="loading" @row-click="open" @selection-change="sel = $event">
+      <el-table-column type="selection" width="42" />
       <el-table-column prop="title" label="标题" min-width="180">
         <template #default="{ row }">
           <b>{{ row.title }}</b>
@@ -164,6 +166,40 @@ async function del(row: Entry) {
   await api(`/entries/${row.id}`, { method: 'DELETE' })
   ElMessage.success('已删除')
   load()
+}
+
+// ---- 批量删除（桌面表格多选；逐条走既有 DELETE，审计天然逐条可查） ----
+const sel = ref<Entry[]>([])
+const batchDeling = ref(false)
+
+async function batchDel() {
+  const n = sel.value.length
+  const names = sel.value.slice(0, 5).map(e => e.title).join('、') + (n > 5 ? ` 等 ${n} 个` : '')
+  await ElMessageBox.confirm(
+    `将删除 ${n} 个条目：${names}。删除后不可恢复，确认继续？`, '批量删除确认',
+    { type: 'warning', confirmButtonText: '全部删除', confirmButtonClass: 'el-button--danger' })
+  batchDeling.value = true
+  let ok = 0
+  const failed: string[] = []
+  try {
+    for (const e of sel.value) {
+      try {
+        await api(`/entries/${e.id}`, { method: 'DELETE' })
+        ok++
+      } catch {
+        failed.push(e.title)
+      }
+    }
+    if (failed.length) {
+      ElMessage.warning(`已删除 ${ok} 个，失败 ${failed.length} 个：${failed.slice(0, 3).join('、')}`)
+    } else {
+      ElMessage.success(`已删除 ${ok} 个条目`)
+    }
+    sel.value = []
+    load()
+  } finally {
+    batchDeling.value = false
+  }
 }
 
 function fmtTime(_r: any, _c: any, v: string) {

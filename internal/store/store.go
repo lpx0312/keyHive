@@ -279,9 +279,16 @@ func (s *Store) SaveTemplate(t *model.Template) error {
 	fieldsJSON, _ := json.Marshal(t.Fields)
 	now := nowUTC()
 	if t.ID > 0 {
-		_, err := s.DB.Exec(`UPDATE category_templates SET name=?, category=?, group_name=?, fields=?, updated_at=? WHERE id=? AND builtin=0`,
+		// 内置模板允许编辑（改名/字段；种子为 INSERT OR IGNORE 且仅首启执行，改动不会被升级覆盖），删除仍限自建
+		res, err := s.DB.Exec(`UPDATE category_templates SET name=?, category=?, group_name=?, fields=?, updated_at=? WHERE id=?`,
 			t.Name, t.Category, t.Group, string(fieldsJSON), now, t.ID)
-		return err
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("模板不存在")
+		}
+		return nil
 	}
 	res, err := s.DB.Exec(`INSERT INTO category_templates (category, name, group_name, fields, builtin, created_at, updated_at)
 		VALUES (?, ?, ?, ?, 0, ?, ?)`, t.Category, t.Name, t.Group, string(fieldsJSON), now, now)
@@ -307,8 +314,8 @@ func (s *Store) RotateAllEntries(newCipher *crypto.Cipher) (int, error) {
 		return 0, err
 	}
 	type rec struct {
-		id     int64
-		raw    string
+		id  int64
+		raw string
 	}
 	var recs []rec
 	for rows.Next() {
