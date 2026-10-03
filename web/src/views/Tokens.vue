@@ -64,6 +64,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, APIToken } from '../api'
+import { copyText } from '../ui'
 
 const tokens = ref<APIToken[]>([])
 const dlg = ref(false)
@@ -99,9 +100,12 @@ async function revoke(row: APIToken) {
   load()
 }
 
-function copy() {
-  navigator.clipboard.writeText(plaintext.value)
-  ElMessage.success('已复制')
+async function copy() {
+  if (await copyText(plaintext.value)) {
+    ElMessage.success('已复制')
+  } else {
+    ElMessage.error('复制失败，请手动选中输入框中的令牌复制')
+  }
 }
 
 function fmt(_r: any, _c: any, v: string | null) {

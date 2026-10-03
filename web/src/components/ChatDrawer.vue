@@ -72,6 +72,7 @@ import MarkdownRender from 'markstream-vue'
 import 'markstream-vue/index.css'
 import { api, Entry } from '../api'
 import { notifyEntriesChanged } from '../store'
+import { copyText } from '../ui'
 
 interface Msg {
   role: 'user' | 'assistant'
@@ -97,9 +98,9 @@ function maskLen(v: string) {
   return v ? '*'.repeat(Math.min(v.length, 8)) : '(空)'
 }
 
-function copy(s: string) {
-  navigator.clipboard.writeText(s)
-  ElMessage.success('已复制')
+async function copy(s: string) {
+  if (await copyText(s)) ElMessage.success('已复制')
+  else ElMessage.error('复制失败，请手动选中文本复制')
 }
 
 function clearChat() {
