@@ -169,6 +169,21 @@ async function load() {
       // 编辑时直接取明文（服务端已记 entry_reveal 审计）
       form.value = await api(`/entries/${id}?reveal=true`)
       if (!form.value.tags) form.value.tags = []
+      return
+    }
+    // 复制新建：?from=<id> 拉源条目明文填充，保存走新建（新 id、标题加副本后缀）
+    const from = Number(route.query.from || 0)
+    if (from > 0) {
+      const src = await api(`/entries/${from}?reveal=true`)
+      form.value = {
+        ...src,
+        id: 0,
+        title: `${src.title} - 副本`,
+        created_at: '',
+        updated_at: '',
+      }
+      if (!form.value.tags) form.value.tags = []
+      templatePicked.value = true // 跳过模板选择页
     }
   } catch (e: any) {
     ElMessage.error(e.message)

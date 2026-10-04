@@ -34,6 +34,7 @@
         <div v-if="row.description" class="card-desc">{{ row.description }}</div>
         <div class="card-actions">
           <el-button size="small" @click.stop="open(row)">编辑</el-button>
+          <el-button size="small" @click.stop="copyEntry(row)">复制</el-button>
           <el-button size="small" type="danger" @click.stop="del(row)">删除</el-button>
         </div>
       </el-card>
@@ -78,9 +79,10 @@
           <span v-else>{{ fmtTime(null, null, row.updated_at) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="130" fixed="right">
+      <el-table-column label="操作" width="185" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click.stop="open(row)">编辑</el-button>
+          <el-button size="small" @click.stop="copyEntry(row)">复制</el-button>
           <el-button size="small" type="danger" @click.stop="del(row)">删除</el-button>
         </template>
       </el-table-column>
@@ -195,6 +197,11 @@ function secretCount(row: Entry) {
 
 function open(row: Entry) {
   router.push(`/entries/${row.id}/edit`)
+}
+
+// 复制：进新建页并带源条目，编辑页拉明文填充，改完保存走新建（新 id、审计 entry_create）
+function copyEntry(row: Entry) {
+  router.push(`/entries/new?from=${row.id}`)
 }
 
 async function del(row: Entry) {
