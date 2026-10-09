@@ -1,8 +1,8 @@
 <template>
   <div>
     <div class="toolbar">
-      <el-input v-model="q" placeholder="搜索标题 / 说明 / 分类" clearable style="width: 260px" @input="load" />
-      <el-select v-model="category" placeholder="全部分类" clearable style="width: 180px" @change="load">
+      <el-input v-model="q" placeholder="搜索标题 / 说明 / 分类" clearable style="width: 260px" @input="() => load(true)" />
+      <el-select v-model="category" placeholder="全部分类" clearable style="width: 180px" @change="() => load(true)">
         <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
       </el-select>
       <el-button type="primary" @click="$router.push('/entries/new')">＋ 新建条目</el-button>
@@ -17,7 +17,7 @@
     <!-- 移动端：卡片列表 -->
     <div v-if="isMobile" v-loading="loading" class="cards">
       <el-empty v-if="!loading && !entries.length" description="暂无条目" />
-      <el-card v-for="row in filtered" :key="row.id" class="card" shadow="hover" @click="open(row)">
+      <el-card v-for="row in paged" :key="row.id" class="card" shadow="hover" @click="open(row)">
         <div class="card-head">
           <b>{{ row.title }}</b>
           <el-tag v-if="!row.ai_visible" size="small" type="warning">AI 不可见</el-tag>
@@ -41,7 +41,7 @@
     </div>
 
     <!-- 桌面：表格 -->
-    <el-table v-else :data="filtered" v-loading="loading" @row-click="open" @selection-change="sel = $event">
+    <el-table v-else :data="paged" v-loading="loading" @row-click="open" @selection-change="sel = $event">
       <el-table-column type="selection" width="42" />
       <el-table-column prop="title" label="标题" min-width="180">
         <template #default="{ row }">
@@ -88,6 +88,11 @@
       </el-table-column>
     </el-table>
 
+    <!-- 分页：本地分页（全量加载后切片），标签筛选/总数统计依赖全量数据 -->
+    <el-pagination v-if="filtered.length" class="pager" v-model:current-page="page" v-model:page-size="pageSize"
+      :page-sizes="[5, 10, 15, 20, 50]" :total="filtered.length" :small="isMobile"
+      :layout="isMobile ? 'prev, pager, next' : 'total, sizes, prev, pager, next'" />
+
     <!-- 导出弹窗 -->
     <el-dialog v-model="expDlg" title="导出全库" width="440px">
       <el-radio-group v-model="expMode">
@@ -133,7 +138,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, Entry } from '../api'
@@ -150,6 +155,13 @@ const tagFilter = ref('')
 const allTags = computed(() => [...new Set(entries.value.flatMap((e) => e.tags || []))])
 const filtered = computed(() =>
   tagFilter.value ? entries.value.filter((e) => (e.tags || []).includes(tagFilter.value)) : entries.value)
+
+// ---- 分页（本地切片）：默认 15/页，5/10/15/20/50 可选 ----
+const page = ref(1)
+const pageSize = ref(15)
+const paged = computed(() =>
+  filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
+watch([tagFilter, pageSize], () => { page.value = 1 })
 
 // 列表 URL 提取：优先 type=url 的非敏感字段，其次按常见 key 名匹配；敏感/遮蔽值不渲染
 const URL_KEYS = new Set(['url', 'uri', 'registry', 'registry_url', 'address', 'endpoint', 'api_server',
@@ -168,7 +180,7 @@ const category = ref('')
 const loading = ref(false)
 const staleDays = ref(90)
 
-async function load() {
+async function load(resetPage = false) {
   loading.value = true
   try {
     const params = new URLSearchParams()
@@ -176,6 +188,12 @@ async function load() {
     if (category.value) params.set('category', category.value)
     entries.value = await api('/entries?' + params.toString())
     categories.value = await api('/categories')
+    if (resetPage) {
+      page.value = 1
+    } else if ((page.value - 1) * pageSize.value >= entries.value.length && page.value > 1) {
+      // 删除/导入后总页数变少：钳到最后一页
+      page.value = Math.max(1, Math.ceil(entries.value.length / pageSize.value))
+    }
   } catch (e: any) {
     ElMessage.error(e.message)
   } finally {
@@ -344,6 +362,7 @@ onMounted(() => { load(); loadStaleDays() })
 
 <style scoped>
 .toolbar { display: flex; gap: 12px; margin-bottom: 16px; }
+.pager { margin-top: 14px; display: flex; justify-content: flex-end; }
 .sec { color: #e6a23c; font-size: 12px; }
 .stale { color: #e6a23c; cursor: help; }
 :deep(.el-table__row) { cursor: pointer; }
@@ -364,6 +383,7 @@ onMounted(() => { load(); loadStaleDays() })
 @media (max-width: 768px) {
   .toolbar { flex-wrap: wrap; }
   .toolbar .el-input, .toolbar .el-select { width: 100% !important; }
+  .pager { justify-content: center; }
 }
 
 .url-link { color: #2563eb; text-decoration: none; }
