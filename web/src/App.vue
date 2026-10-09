@@ -73,6 +73,9 @@ async function logout() {
 <style>
 body { margin: 0; font-family: system-ui, 'Microsoft YaHei', sans-serif; background: #f5f7fa; }
 .layout { min-height: 100vh; }
+/* 桌面（水平布局）：固定视口高，el-main 自带 overflow:auto 独立滚动，
+   侧栏与底部用户信息常驻可见，不随内容滚走 */
+.layout:not(.is-vertical) { height: 100vh; }
 .aside { background: #1d2939; color: #e5e7eb; display: flex; flex-direction: column; }
 .logo { font-size: 18px; font-weight: 600; padding: 20px 16px; }
 .menu { background: transparent; border-right: none; flex: 1; }
@@ -86,7 +89,8 @@ body { margin: 0; font-family: system-ui, 'Microsoft YaHei', sans-serif; backgro
 .main { padding: 24px; }
 
 /* 移动端顶栏 */
-.m-header { background: #1d2939; color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 16px; height: 52px; flex-shrink: 0; }
+/* 移动端顶栏：sticky 跟随，滚动中也能随时打开菜单 */
+.m-header { background: #1d2939; color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 16px; height: 52px; flex-shrink: 0; position: sticky; top: 0; z-index: 10; }
 .m-header .logo { color: #fff; padding: 0; font-size: 17px; }
 .m-header .el-button { color: #fff; }
 .drawer-inner { display: flex; flex-direction: column; height: 100%; }

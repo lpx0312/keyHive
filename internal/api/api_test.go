@@ -400,3 +400,43 @@ func doGet(t *testing.T, c *http.Client, url string) (int, []any) {
 	json.NewDecoder(resp.Body).Decode(&list)
 	return resp.StatusCode, list
 }
+
+// 审计分页：with_total=1 返回 {total, logs}，不带参数保持纯数组（兼容）
+func TestAuditPagination(t *testing.T) {
+	srv, _ := newHumanServer(t)
+	defer srv.Close()
+	base := srv.URL + "/api/v1"
+	admin := client(t)
+	do(t, admin, "POST", base+"/auth/login", `{"username":"admin","password":"`+adminPW+`"}`)
+	// 产生 3 条 entry_create 审计
+	for i := 0; i < 3; i++ {
+		do(t, admin, "POST", base+"/entries",
+			`{"title":"audit-t`+string(rune('0'+i))+`","fields":[]}`)
+	}
+	// with_total + limit=2 → 结构化响应，total>=3 且只回 2 条
+	code, out := do(t, admin, "GET", base+"/audit?with_total=1&limit=2&action=entry_create", "")
+	if code != 200 {
+		t.Fatalf("with_total 查询应 200，实际 %d", code)
+	}
+	total, _ := out["total"].(float64)
+	logs, _ := out["logs"].([]any)
+	if total < 3 || len(logs) != 2 {
+		t.Fatalf("应为 total>=3 + 2 条日志，实际 total=%v logs=%d", total, len(logs))
+	}
+	// offset=2 → 剩 1 条
+	code, out = do(t, admin, "GET", base+"/audit?with_total=1&limit=2&offset=2&action=entry_create", "")
+	logs, _ = out["logs"].([]any)
+	if code != 200 || len(logs) != 1 {
+		t.Fatalf("offset=2 应剩 1 条，实际 %d", len(logs))
+	}
+	// 不带 with_total → 纯数组（旧契约）
+	resp, err := admin.Get(base + "/audit?action=entry_create")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if body[0] != '[' {
+		t.Fatalf("不带 with_total 应返回数组，实际 %s...", string(body[:20]))
+	}
+}

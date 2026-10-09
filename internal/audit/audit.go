@@ -18,6 +18,19 @@ func Log(db *sql.DB, actorType string, actorID int64, actorName, action string, 
 		actorType, actorID, actorName, action, entryID, detail, ip, nowUTC())
 }
 
+// Count 审计总数（action 筛选与 List 一致），分页页码计算用
+func Count(db *sql.DB, action string) (int, error) {
+	q := `SELECT COUNT(*) FROM audit_logs`
+	args := []any{}
+	if action != "" {
+		q += ` WHERE action = ?`
+		args = append(args, action)
+	}
+	var n int
+	err := db.QueryRow(q, args...).Scan(&n)
+	return n, err
+}
+
 // List 查询审计（action / actor 筛选 + 分页）
 func List(db *sql.DB, action string, limit, offset int) ([]model.AuditLog, error) {
 	if limit <= 0 || limit > 200 {

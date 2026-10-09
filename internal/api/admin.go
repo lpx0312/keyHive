@@ -183,6 +183,8 @@ func (s *Server) revokeToken(w http.ResponseWriter, r *http.Request) {
 
 // ---- 审计 ----
 
+// listAudit 审计查询：limit/offset/action 分页筛选；
+// with_total=1 时返回 {total, logs}（前端页码条需要总数），否则保持纯数组
 func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := intQuery(q.Get("limit"), 50), intQuery(q.Get("offset"), 0)
@@ -193,6 +195,15 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {
 	}
 	if list == nil {
 		list = []model.AuditLog{}
+	}
+	if q.Get("with_total") == "1" {
+		total, err := audit.Count(s.Store.DB, q.Get("action"))
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]any{"total": total, "logs": list})
+		return
 	}
 	writeJSON(w, 200, list)
 }
