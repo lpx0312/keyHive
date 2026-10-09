@@ -28,3 +28,12 @@ export const ENTRIES_CHANGED_EVENT = 'keyhive:entries-changed'
 export function notifyEntriesChanged() {
   window.dispatchEvent(new CustomEvent(ENTRIES_CHANGED_EVENT))
 }
+
+// AI 助手悬浮球显隐：悬浮球长按/右键隐藏，设置页开关恢复。
+// 同样用 window 事件而非本模块 ref——设置页与 App 层 chunk 不同，store 可能双实例
+export const FAB_HIDDEN_EVENT = 'keyhive:fab-hidden-changed'
+
+export function setFabHidden(hidden: boolean) {
+  localStorage.setItem('kh-fab-hidden', hidden ? '1' : '0')
+  window.dispatchEvent(new CustomEvent(FAB_HIDDEN_EVENT))
+}

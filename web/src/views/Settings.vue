@@ -19,6 +19,16 @@
     </el-card>
 
     <el-card style="max-width: 520px; margin-top: 16px">
+      <template #header>界面</template>
+      <el-form label-width="120px">
+        <el-form-item label="AI 助手悬浮球">
+          <el-switch v-model="fabVisible" @change="onFabVisibleChange" />
+        </el-form-item>
+      </el-form>
+      <p class="tip">悬浮球可拖动到任意位置避开遮挡；在悬浮球上长按或右键也可直接隐藏（隐藏后在此重新开启）。</p>
+    </el-card>
+
+    <el-card style="max-width: 520px; margin-top: 16px">
       <template #header>
         AI 录入助手配置
         <el-tag v-if="aiCfg.configured === 'true'" type="success" size="small" style="margin-left: 8px">已配置</el-tag>
@@ -90,11 +100,17 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
-import { me } from '../store'
+import { me, setFabHidden } from '../store'
 
 const oldPw = ref('')
 const newPw = ref('')
 const newPw2 = ref('')
+
+// ---- AI 助手悬浮球开关（隐藏入口在悬浮球长按/右键，恢复入口在此） ----
+const fabVisible = ref(localStorage.getItem('kh-fab-hidden') !== '1')
+function onFabVisibleChange(v: any) {
+  setFabHidden(!v) // 写 localStorage 并广播事件，ChatDrawer 跨 chunk 同步
+}
 
 async function change() {
   if (newPw.value.length < 8) return ElMessage.warning('新密码至少 8 位')
