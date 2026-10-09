@@ -14,9 +14,9 @@
       <el-button v-if="sel.length" type="danger" :loading="batchDeling" @click="batchDel">🗑 删除选中（{{ sel.length }}）</el-button>
     </div>
 
-    <!-- 移动端：卡片列表 -->
+    // 移动端：卡片列表
     <div v-if="isMobile" v-loading="loading" class="cards">
-      <el-empty v-if="!loading && !entries.length" description="暂无条目" />
+      <el-empty v-if="!loading && !entries.length" :description="q || category || tagFilter ? '没有匹配的条目' : '暂无条目'" />
       <el-card v-for="row in paged" :key="row.id" class="card" shadow="hover" @click="open(row)">
         <div class="card-head">
           <b>{{ row.title }}</b>
@@ -186,8 +186,8 @@ async function load(resetPage = false) {
     const params = new URLSearchParams()
     if (q.value) params.set('q', q.value)
     if (category.value) params.set('category', category.value)
-    entries.value = await api('/entries?' + params.toString())
-    categories.value = await api('/categories')
+    entries.value = (await api('/entries?' + params.toString())) || [] // 后端保证空结果为 []，此处兜底防 null 渲染崩溃
+    categories.value = (await api('/categories')) || []
     if (resetPage) {
       page.value = 1
     } else if ((page.value - 1) * pageSize.value >= entries.value.length && page.value > 1) {

@@ -199,7 +199,8 @@ func (s *Store) ListEntries(q, category string) ([]model.Entry, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var list []model.Entry
+	// 初始化为空切片：nil slice 会被 json.Marshal 成 null，前端 entries.value=null 渲染崩溃
+	list := make([]model.Entry, 0)
 	for rows.Next() {
 		e, err := s.scanEntry(rows)
 		if err != nil {
@@ -217,7 +218,7 @@ func (s *Store) Categories() ([]string, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var list []string
+	list := make([]string, 0) // 同上：空结果必须是 [] 而非 null
 	for rows.Next() {
 		var c string
 		if err := rows.Scan(&c); err != nil {
@@ -250,7 +251,7 @@ func (s *Store) ListTemplates() ([]model.Template, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var list []model.Template
+	list := make([]model.Template, 0) // 同上：空结果必须是 [] 而非 null
 	for rows.Next() {
 		t, err := scanTemplate(rows)
 		if err != nil {
