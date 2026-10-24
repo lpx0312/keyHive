@@ -20,9 +20,12 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
+import { loadMe } from '../store'
 
+const router = useRouter()
 const username = ref('')
 const password = ref('')
 const loading = ref(false)
@@ -35,7 +38,10 @@ async function login() {
       method: 'POST',
       body: JSON.stringify({ username: username.value, password: password.value }),
     })
-    location.href = '/entries'
+    // 路由内跳转，不整页重载（整页重载每次登录都要重新下载解析整个前端包，是登录慢的主因）。
+    // App.vue 的 loadMe 只在应用挂载时跑一次，登录页那次必然 401，这里补跑一次填充侧栏用户名
+    await loadMe()
+    await router.push('/entries')
   } catch (e: any) {
     ElMessage.error(e.message)
   } finally {

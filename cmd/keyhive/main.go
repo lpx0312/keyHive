@@ -145,7 +145,7 @@ func ensureKeyCheck(db *sql.DB, c *crypto.Cipher) error {
 
 func spaHandler(dist fs.FS) http.Handler {
 	fileServer := http.FileServer(http.FS(dist))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/")
 		if path == "" {
 			path = "index.html"
@@ -155,12 +155,18 @@ func spaHandler(dist fs.FS) http.Handler {
 			r.URL.Path = "/"
 		}
 		// index.html 禁缓存：assets 文件名带 hash 可长缓存，但入口必须每次校验，
-		// 否则发版后浏览器仍按旧 index.html 加载旧资源（联动/修复"不生效"的根因）
+		// 否则发版后浏览器仍按旧 index.html 加载旧资源（联动/修复"不生效"的根因）。
+		// embed 文件无 modtime，http.FileServer 不会发 Last-Modified/ETag，
+		// 不显式设置缓存头的话浏览器每次都全量重拉资源
 		if r.URL.Path == "/" || path == "index.html" {
 			w.Header().Set("Cache-Control", "no-cache")
+		} else if strings.HasPrefix(path, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+	// 仅静态资源开 gzip（1.8MB JS 压到 ~450KB；API/SSE 不走这个 handler，不受影响）
+	return middleware.Compress(5)(h)
 }
 
 func envOr(key, def string) string {
