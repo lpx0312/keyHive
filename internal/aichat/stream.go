@@ -95,6 +95,9 @@ type toolCallAcc struct {
 
 // callLLMStream 发起 stream:true 请求，逐 delta 转发回复文本，流结束返回完整 choice
 func callLLMStream(ctx context.Context, cfg Config, msgs []llmMessage, emit func(StreamEvent) error) (*llmResponseChoice, error) {
+	if cfg.ProtocolOrDefault() == ProtocolAnthropic {
+		return callAnthropic(ctx, cfg, msgs, emit)
+	}
 	reqBody, _ := json.Marshal(map[string]any{
 		"model":    cfg.Model,
 		"messages": msgs,

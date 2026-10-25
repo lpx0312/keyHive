@@ -35,14 +35,39 @@
         <el-tag v-else type="info" size="small" style="margin-left: 8px">未配置</el-tag>
       </template>
       <el-form label-width="90px">
+        <el-form-item label="协议">
+          <el-radio-group v-model="aiCfg.protocol" @change="onProtocolChange">
+            <el-radio value="openai">OpenAI 兼容</el-radio>
+            <el-radio value="anthropic">Anthropic</el-radio>
+          </el-radio-group>
+          <p class="tip" style="margin-top: 2px">绝大多数服务商（含国内）都兼容 OpenAI 协议；Claude 系走 Anthropic 协议</p>
+        </el-form-item>
+        <el-form-item label="服务商预设">
+          <el-select v-model="presetSel" placeholder="选择服务商，自动填地址和常用模型" clearable
+            style="width: 100%" @change="onPreset">
+            <el-option v-for="p in presets" :key="p.name" :label="p.name" :value="p.name">
+              <span>{{ p.name }}</span>
+              <span class="pbadge" :class="p.protocol">{{ p.protocol === 'anthropic' ? 'Anthropic' : 'OpenAI' }}</span>
+            </el-option>
+          </el-select>
+        </el-form-item>
         <el-form-item label="API 地址">
-          <el-input v-model="aiCfg.base_url" placeholder="OpenAI 兼容端点" />
+          <el-input v-model="aiCfg.base_url" :placeholder="curProtocol === 'anthropic' ? '如 https://api.anthropic.com' : 'OpenAI 兼容端点，如 https://api.deepseek.com/v1'" />
         </el-form-item>
         <el-form-item label="API Key">
-          <el-input v-model="aiCfg.api_key" show-password :placeholder="aiCfg.configured === 'true' ? '已保存（****' + tail + '），留空不修改' : 'sk-...'" />
+          <el-input v-model="aiCfg.api_key" show-password :placeholder="keyPlaceholder" />
         </el-form-item>
         <el-form-item label="模型">
-          <el-input v-model="aiCfg.model" placeholder="如 glm-4.6" />
+          <div class="model-row">
+            <el-select v-model="aiCfg.model" filterable allow-create default-first-option
+              placeholder="下拉选择，或直接输入自定义模型名" style="flex: 1">
+              <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
+            </el-select>
+            <el-button :loading="fetchingModels" @click="fetchModels">获取模型列表</el-button>
+          </div>
+          <p class="tip" style="margin-top: 2px">
+            从服务商拉取全部可用模型（用已填地址和 Key）；预设自带的常用模型无需拉取即可选
+          </p>
         </el-form-item>
         <el-button type="primary" :loading="savingAI" @click="saveAI">保存配置</el-button>
         <el-button :loading="testing" @click="testAI">测试连接</el-button>
@@ -124,11 +149,72 @@ async function change() {
 }
 
 // ---- AI 录入助手配置 ----
-const aiCfg = ref({ base_url: '', api_key: '', model: '', configured: 'false' })
+interface AIPreset { name: string; protocol: string; base_url: string; models: string[]; key_hint?: string }
+const aiCfg = ref<any>({ protocol: 'openai', base_url: '', api_key: '', model: '', configured: 'false' })
+const presets = ref<AIPreset[]>([])
+const presetSel = ref('') // 服务商预设选择；空 = 手动自定义
+const fetchedModels = ref<string[]>([]) // 「获取模型列表」拉到的全量模型
+const fetchingModels = ref(false)
 const savingAI = ref(false)
 const testing = ref(false)
 const testResult = ref<{ ok: boolean; model?: string; latency_ms?: number; reply?: string; error?: string } | null>(null)
-const tail = computed(() => aiCfg.value.api_key.slice(-4))
+const tail = computed(() => (aiCfg.value.api_key || '').slice(-4))
+
+const curProtocol = computed(() => (aiCfg.value.protocol === 'anthropic' ? 'anthropic' : 'openai'))
+const curPreset = computed(() => presets.value.find(p => p.name === presetSel.value))
+
+// Key 输入框提示：已保存则提示留空不修改，否则给预设的 Key 获取地提示
+const keyPlaceholder = computed(() => {
+  const hint = curPreset.value?.key_hint || ''
+  if (aiCfg.value.configured === 'true')
+    return `已保存（****${tail.value}），留空不修改${hint ? '；' + hint : ''}`
+  return hint || 'sk-...'
+})
+
+// 模型下拉候选：预设常用模型 + 已拉取的全量列表 + 当前值兜底（去重）
+const modelOptions = computed(() => {
+  const set = new Set<string>([...(curPreset.value?.models || []), ...fetchedModels.value])
+  if (aiCfg.value.model) set.add(aiCfg.value.model)
+  return Array.from(set)
+})
+
+// 切协议时清掉按旧协议拉的模型清单，避免误导
+function onProtocolChange() {
+  fetchedModels.value = []
+}
+
+// 选中预设：自动填协议 / 地址 / 常用模型与 Key 提示
+function onPreset(name: string) {
+  const p = presets.value.find(p => p.name === name)
+  if (!p) return
+  aiCfg.value.protocol = p.protocol === 'anthropic' ? 'anthropic' : 'openai'
+  aiCfg.value.base_url = p.base_url
+  fetchedModels.value = []
+  const ms = p.models || []
+  if (ms.length && !ms.includes(aiCfg.value.model)) aiCfg.value.model = ms[0]
+}
+
+// 获取模型列表：用表单当前值请求（Key 留空/遮蔽时后端回退已保存值）
+async function fetchModels() {
+  fetchingModels.value = true
+  try {
+    const r = await api('/ai-config/models', {
+      method: 'POST',
+      body: JSON.stringify({
+        protocol: aiCfg.value.protocol, base_url: aiCfg.value.base_url, api_key: aiCfg.value.api_key,
+      }),
+    })
+    if (!r.ok) throw new Error(r.error || '获取失败')
+    fetchedModels.value = r.models || []
+    if (!fetchedModels.value.length) throw new Error('服务商未返回任何模型')
+    if (!fetchedModels.value.includes(aiCfg.value.model)) aiCfg.value.model = fetchedModels.value[0]
+    ElMessage.success(`已获取 ${fetchedModels.value.length} 个模型`)
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  } finally {
+    fetchingModels.value = false
+  }
+}
 
 // 测试连接：用表单当前值（Key 留空/遮蔽时后端自动回退已保存值），无需先保存
 async function testAI() {
@@ -147,7 +233,13 @@ async function testAI() {
 }
 
 async function loadAI() {
-  aiCfg.value = await api('/ai-config')
+  const r = await api('/ai-config')
+  presets.value = r.presets || []
+  delete r.presets
+  aiCfg.value = { ...r, protocol: r.protocol === 'anthropic' ? 'anthropic' : 'openai' }
+  // 已保存地址+协议与某个预设匹配时回显预设名
+  const p = presets.value.find(p => p.base_url === aiCfg.value.base_url && p.protocol === aiCfg.value.protocol)
+  presetSel.value = p ? p.name : ''
 }
 
 async function saveAI() {
@@ -216,4 +308,7 @@ onMounted(() => { loadAI(); loadStale(); loadVersion() })
 .tip { color: #94a3b8; font-size: 12px; margin-top: 8px; }
 .version { color: #94a3b8; font-size: 12px; margin-top: 24px; }
 .mk { word-break: break-all; background: #fef0f0; padding: 0 4px; border-radius: 3px; }
+.model-row { display: flex; gap: 8px; width: 100%; }
+.pbadge { float: right; font-size: 11px; color: #10b981; }
+.pbadge.anthropic { color: #d97706; }
 </style>

@@ -14,10 +14,20 @@ import (
 
 // settings 键
 const (
-	settingLLMBaseURL = "ai_llm_base_url"
-	settingLLMAPIKey  = "ai_llm_api_key" // 密文存储
-	settingLLMModel   = "ai_llm_model"
+	settingLLMProtocol = "ai_llm_protocol" // openai（默认）| anthropic
+	settingLLMBaseURL  = "ai_llm_base_url"
+	settingLLMAPIKey   = "ai_llm_api_key" // 密文存储
+	settingLLMModel    = "ai_llm_model"
 )
+
+// currentLLMConfig 组装当前生效的 LLM 配置（settings 缺省时按协议默认值兜底）
+func (s *Server) currentLLMConfig() aichat.Config {
+	return aichat.Config{
+		Protocol: orDefault(s.getSetting(settingLLMProtocol), aichat.ProtocolOpenAI),
+		BaseURL:  orDefault(s.getSetting(settingLLMBaseURL), aichat.DefaultBaseURL),
+		Model:    orDefault(s.getSetting(settingLLMModel), aichat.DefaultModel),
+	}
+}
 
 func (s *Server) getSetting(key string) string {
 	var v string
@@ -52,22 +62,35 @@ func (s *Server) handleAIConfig(w http.ResponseWriter, r *http.Request) {
 				keyPlain = dec
 			}
 		}
-		writeJSON(w, 200, map[string]string{
+		writeJSON(w, 200, map[string]any{
+			"protocol":    orDefault(s.getSetting(settingLLMProtocol), aichat.ProtocolOpenAI),
 			"base_url":    orDefault(s.getSetting(settingLLMBaseURL), aichat.DefaultBaseURL),
 			"api_key":     maskedKey(keyPlain),
 			"model":       orDefault(s.getSetting(settingLLMModel), aichat.DefaultModel),
 			"configured":  boolStr(keyPlain != ""),
+			"presets":     aichat.Presets,
 		})
 		return
 	}
 	var req struct {
-		BaseURL string `json:"base_url"`
-		APIKey  string `json:"api_key"`
-		Model   string `json:"model"`
+		Protocol string `json:"protocol"`
+		BaseURL  string `json:"base_url"`
+		APIKey   string `json:"api_key"`
+		Model    string `json:"model"`
 	}
 	if err := readBody(r, &req); err != nil {
 		writeErr(w, 400, "请求格式错误")
 		return
+	}
+	if p := strings.TrimSpace(req.Protocol); p != "" {
+		if p != aichat.ProtocolOpenAI && p != aichat.ProtocolAnthropic {
+			writeErr(w, 400, "protocol 仅支持 openai / anthropic")
+			return
+		}
+		if err := s.putSetting(settingLLMProtocol, p); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
 	}
 	if strings.TrimSpace(req.BaseURL) != "" {
 		if err := s.putSetting(settingLLMBaseURL, strings.TrimSpace(req.BaseURL)); err != nil {
@@ -122,11 +145,8 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "API Key 解密失败（主密钥变更？）")
 		return
 	}
-	cfg := aichat.Config{
-		BaseURL: orDefault(s.getSetting(settingLLMBaseURL), aichat.DefaultBaseURL),
-		APIKey:  apiKey,
-		Model:   orDefault(s.getSetting(settingLLMModel), aichat.DefaultModel),
-	}
+	cfg := s.currentLLMConfig()
+	cfg.APIKey = apiKey
 
 	// category 清单来自模板表
 	categories := []string{}
@@ -208,11 +228,8 @@ func (s *Server) handleAIChatStream(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "API Key 解密失败（主密钥变更？）")
 		return
 	}
-	cfg := aichat.Config{
-		BaseURL: orDefault(s.getSetting(settingLLMBaseURL), aichat.DefaultBaseURL),
-		APIKey:  apiKey,
-		Model:   orDefault(s.getSetting(settingLLMModel), aichat.DefaultModel),
-	}
+	cfg := s.currentLLMConfig()
+	cfg.APIKey = apiKey
 
 	categories := []string{}
 	if tpls, err := s.Store.ListTemplates(); err == nil {
@@ -311,9 +328,10 @@ func fmtInt(n int64) string {
 // handleAIConfigTest 测试 LLM 连通性：优先用表单当前值；Key 为空/遮蔽时回退已保存值
 func (s *Server) handleAIConfigTest(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		BaseURL string `json:"base_url"`
-		APIKey  string `json:"api_key"`
-		Model   string `json:"model"`
+		Protocol string `json:"protocol"`
+		BaseURL  string `json:"base_url"`
+		APIKey   string `json:"api_key"`
+		Model    string `json:"model"`
 	}
 	if err := readBody(r, &req); err != nil {
 		writeErr(w, 400, "请求格式错误")
@@ -334,10 +352,46 @@ func (s *Server) handleAIConfigTest(w http.ResponseWriter, r *http.Request) {
 		}
 		apiKey = dec
 	}
+	saved := s.currentLLMConfig()
 	cfg := aichat.Config{
-		BaseURL: orDefault(strings.TrimSpace(req.BaseURL), orDefault(s.getSetting(settingLLMBaseURL), aichat.DefaultBaseURL)),
-		APIKey:  apiKey,
-		Model:   orDefault(strings.TrimSpace(req.Model), orDefault(s.getSetting(settingLLMModel), aichat.DefaultModel)),
+		Protocol: orDefault(strings.TrimSpace(req.Protocol), saved.Protocol),
+		BaseURL:  orDefault(strings.TrimSpace(req.BaseURL), saved.BaseURL),
+		APIKey:   apiKey,
+		Model:    orDefault(strings.TrimSpace(req.Model), saved.Model),
 	}
 	writeJSON(w, 200, aichat.TestConnection(r.Context(), cfg))
+}
+
+// handleAIListModels 拉取服务商模型清单（前端「获取模型列表」下拉用）：
+// 优先用表单当前值，Key 为空/遮蔽时回退已保存值；本地端点（Ollama 等）无 Key 也可拉取
+func (s *Server) handleAIListModels(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Protocol string `json:"protocol"`
+		BaseURL  string `json:"base_url"`
+		APIKey   string `json:"api_key"`
+	}
+	if err := readBody(r, &req); err != nil {
+		writeErr(w, 400, "请求格式错误")
+		return
+	}
+	apiKey := strings.TrimSpace(req.APIKey)
+	if apiKey == "" || strings.HasPrefix(apiKey, "****") {
+		if keyEnc := s.getSetting(settingLLMAPIKey); keyEnc != "" {
+			if dec, err := s.Store.Cipher.Decrypt(keyEnc); err == nil {
+				apiKey = dec
+			}
+		}
+	}
+	saved := s.currentLLMConfig()
+	cfg := aichat.Config{
+		Protocol: orDefault(strings.TrimSpace(req.Protocol), saved.Protocol),
+		BaseURL:  orDefault(strings.TrimSpace(req.BaseURL), saved.BaseURL),
+		APIKey:   apiKey,
+	}
+	models, err := aichat.ListModels(r.Context(), cfg)
+	if err != nil {
+		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "models": models})
 }

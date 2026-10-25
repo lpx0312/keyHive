@@ -17,11 +17,26 @@ import (
 	"github.com/lpx0312/keyHive/internal/model"
 )
 
+// 支持的协议：OpenAI 兼容（/chat/completions，Bearer）与 Anthropic（/v1/messages，x-api-key）
+const (
+	ProtocolOpenAI    = "openai"
+	ProtocolAnthropic = "anthropic"
+)
+
 // Config LLM 连接配置（存 settings 表；APIKey 落库前由 API 层加密）
 type Config struct {
-	BaseURL string `json:"base_url"` // OpenAI 兼容端点根地址，如 https://open.bigmodel.cn/api/paas/v4
-	APIKey  string `json:"api_key"`
-	Model   string `json:"model"`
+	Protocol string `json:"protocol"` // openai（默认，兼容绝大多数服务商）| anthropic
+	BaseURL  string `json:"base_url"` // 端点根地址，如 https://open.bigmodel.cn/api/paas/v4
+	APIKey   string `json:"api_key"`
+	Model    string `json:"model"`
+}
+
+// ProtocolOrDefault 归一化协议：空串/未知值一律按 OpenAI 兼容处理（老库无此配置时的行为）
+func (c Config) ProtocolOrDefault() string {
+	if strings.EqualFold(strings.TrimSpace(c.Protocol), ProtocolAnthropic) {
+		return ProtocolAnthropic
+	}
+	return ProtocolOpenAI
 }
 
 const DefaultBaseURL = "https://open.bigmodel.cn/api/paas/v4"
@@ -313,6 +328,9 @@ func execTool(tc llmToolCall, cb ToolCallbacks, res *Response) (content string, 
 }
 
 func callLLM(ctx context.Context, cfg Config, msgs []llmMessage) (*llmResponseChoice, error) {
+	if cfg.ProtocolOrDefault() == ProtocolAnthropic {
+		return callAnthropic(ctx, cfg, msgs, nil)
+	}
 	reqBody, _ := json.Marshal(llmRequest{
 		Model: cfg.Model, Messages: msgs, Tools: toolsSchema(), ToolCall: "auto",
 	})

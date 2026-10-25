@@ -83,6 +83,7 @@ func (s *Server) Routes(r chi.Router) {
 		// AI 录入助手：聊天对所有登录用户开放，LLM 配置仅管理员
 		pr.Get("/ai-config", s.handleAIConfig)
 		pr.Post("/ai-config/test", s.handleAIConfigTest)
+		pr.Post("/ai-config/models", s.handleAIListModels)
 		pr.Post("/ai-chat", s.handleAIChat)
 		pr.Post("/ai-chat/stream", s.handleAIChatStream)
 	})
