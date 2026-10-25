@@ -5,12 +5,20 @@
     @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp"
     @pointercancel="onPointerUp" @contextmenu.prevent="hideFab">🤖</div>
 
-  <el-drawer v-model="open" title="🤖 AI 录入助手" size="440px" :append-to-body="true">
+  <!-- 全屏切换：440px 窄抽屉里 Markdown 长文档/表格展示不全，一键铺满阅读 -->
+  <el-drawer v-model="open" :size="fullscreen ? '100%' : '440px'" :append-to-body="true">
+    <template #header>
+      <div class="dhead">
+        <span class="dtitle">🤖 AI 录入助手</span>
+        <el-button text size="small" class="fsbtn" :title="fullscreen ? '恢复窄抽屉' : '铺满窗口，完整阅读 Markdown'"
+          @click="fullscreen = !fullscreen">{{ fullscreen ? '⤡ 退出全屏' : '⛶ 全屏' }}</el-button>
+      </div>
+    </template>
     <el-alert type="warning" :closable="false" class="privacy"
       title="你输入的内容（含密码）将发送到你配置的 LLM 服务商（智谱等）用于解析" />
 
     <div ref="listEl" class="msgs">
-      <div v-for="(m, i) in messages" :key="i" :class="['msg', m.role]">
+      <div v-for="(m, i) in messages" :key="i" :class="['msg', m.role, { fs: fullscreen }]">
         <!-- 过程行：agent 正在做什么（流式状态） -->
         <div v-for="(st, j) in m.statuses" :key="j" class="status-line"
           :class="{ active: m.streaming && j === m.statuses!.length - 1 }">
@@ -92,6 +100,7 @@ interface Msg {
 const WELCOME = '你好！把你要存的账号/凭据信息用大白话告诉我（地址、用户名、密码、组织等），我解析成条目给你确认后入库。要修改已有条目也可以直接说。'
 
 const open = ref(false)
+const fullscreen = ref(false) // 全屏阅读模式：drawer 铺满窗口，Markdown 完整展示
 const messages = ref<Msg[]>([{ role: 'assistant', content: WELCOME }])
 const text = ref('')
 const loading = ref(false)
@@ -313,9 +322,14 @@ async function scrollBottom() {
 }
 .chat-fab:hover { background: #1d4ed8; }
 .chat-fab.dragging { cursor: grabbing; opacity: .85; }
+.dhead { display: flex; align-items: center; gap: 8px; }
+.dtitle { font-size: 16px; font-weight: 700; color: #0f172a; }
+.fsbtn { margin-left: auto; color: #64748b; }
+.fsbtn:hover { color: #2563eb; }
 .privacy { margin-bottom: 10px; }
 .msgs { display: flex; flex-direction: column; gap: 10px; height: calc(100% - 150px); overflow-y: auto; padding-right: 4px; }
 .msg { max-width: 94%; }
+.msg.fs { max-width: min(94%, 880px); } /* 全屏时限宽数字化行长，长 Markdown 不至于一行拉满屏 */
 .msg.user { align-self: flex-end; }
 .msg.assistant { align-self: flex-start; }
 .status-line { font-size: 12px; color: #64748b; margin: 2px 0; }
