@@ -371,9 +371,11 @@ func callLLM(ctx context.Context, cfg Config, msgs []llmMessage) (*llmResponseCh
 	return &out.Choices[0], nil
 }
 
+// truncate 按 rune 截断（byte 截断会把中文切成乱码 �）
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n] + "..."
+	return string(r[:n]) + "…"
 }

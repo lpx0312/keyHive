@@ -74,11 +74,14 @@
         <el-alert v-if="testResult" :type="testResult.ok ? 'success' : 'error'" :closable="true"
           style="margin-top: 10px" @close="testResult = null">
           <template #title>
-            <span v-if="testResult.ok">
-              ✅ 连接成功（模型 {{ testResult.model }}，耗时 {{ testResult.latency_ms }}ms，回复：{{ testResult.reply || '-' }}）
-            </span>
-            <span v-else>❌ {{ testResult.error }}</span>
+            <span v-if="testResult.ok">✅ 连接成功{{ latencyText }}</span>
+            <span v-else>❌ 连接失败{{ latencyText }}</span>
           </template>
+          <div v-if="testResult.ok" class="test-detail">
+            <div>{{ protocolLabel }} 协议 · 模型 {{ testResult.model || '-' }}</div>
+            <div v-if="testResult.reply" class="test-reply">回复：{{ testResult.reply }}</div>
+          </div>
+          <div v-else class="test-detail">{{ testResult.error || '未知错误' }}</div>
         </el-alert>
       </el-form>
       <p class="tip">Key 用主密钥加密存储。聊天解析时，你输入的内容（含密码）会发送到该 LLM 服务商；高敏凭据建议仍用表单录入。</p>
@@ -157,7 +160,11 @@ const fetchedModels = ref<string[]>([]) // 「获取模型列表」拉到的全�
 const fetchingModels = ref(false)
 const savingAI = ref(false)
 const testing = ref(false)
-const testResult = ref<{ ok: boolean; model?: string; latency_ms?: number; reply?: string; error?: string } | null>(null)
+const testResult = ref<{ ok: boolean; model?: string; protocol?: string; latency_ms?: number; reply?: string; error?: string } | null>(null)
+// 耗时与协议标签：后端未返回时优雅缺省（不显示"耗时 ms"空壳）
+const latencyText = computed(() =>
+  typeof testResult.value?.latency_ms === 'number' ? `（耗时 ${testResult.value.latency_ms}ms）` : '')
+const protocolLabel = computed(() => (testResult.value?.protocol === 'anthropic' ? 'Anthropic' : 'OpenAI 兼容'))
 const tail = computed(() => (aiCfg.value.api_key || '').slice(-4))
 
 const curProtocol = computed(() => (aiCfg.value.protocol === 'anthropic' ? 'anthropic' : 'openai'))
@@ -311,4 +318,6 @@ onMounted(() => { loadAI(); loadStale(); loadVersion() })
 .model-row { display: flex; gap: 8px; width: 100%; }
 .pbadge { float: right; font-size: 11px; color: #10b981; }
 .pbadge.anthropic { color: #d97706; }
+.test-detail { font-size: 12px; line-height: 1.7; }
+.test-reply { color: #64748b; word-break: break-all; }
 </style>
