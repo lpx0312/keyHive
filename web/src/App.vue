@@ -72,17 +72,23 @@ async function logout() {
 
 <style>
 body { margin: 0; font-family: system-ui, 'Microsoft YaHei', sans-serif; background: #f5f7fa; }
+/* 全局细滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #c9d2e0; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #b3bfd2; }
+::-webkit-scrollbar-track { background: transparent; }
 .layout { min-height: 100vh; }
 /* 桌面（水平布局）：固定视口高，el-main 自带 overflow:auto 独立滚动，
    侧栏与底部用户信息常驻可见，不随内容滚走 */
 .layout:not(.is-vertical) { height: 100vh; }
 .aside { background: #1d2939; color: #e5e7eb; display: flex; flex-direction: column; }
-.logo { font-size: 18px; font-weight: 600; padding: 20px 16px; }
-.menu { background: transparent; border-right: none; flex: 1; }
-.menu .el-menu-item { color: #cbd5e1; }
-.menu .el-menu-item.is-active { color: #60a5fa; background: #111827; }
-.menu .el-menu-item:hover { background: #111827; }
-.logout { padding: 16px; color: #94a3b8; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; }
+.logo { font-size: 18px; font-weight: 700; letter-spacing: .3px; padding: 18px 4px 14px; margin: 0 12px; border-bottom: 1px solid rgba(255, 255, 255, .08); }
+.menu { background: transparent; border-right: none; flex: 1; padding: 10px 8px; }
+.menu .el-menu-item { color: #94a3b8; height: 44px; line-height: 44px; margin: 2px 0; border-radius: 8px; position: relative; transition: background-color .2s, color .2s; }
+.menu .el-menu-item:hover { background: rgba(255, 255, 255, .06); color: #e2e8f0; }
+.menu .el-menu-item.is-active { color: #60a5fa; background: rgba(96, 165, 250, .14); }
+.menu .el-menu-item.is-active::before { content: ''; position: absolute; left: -8px; top: 50%; transform: translateY(-50%); width: 3px; height: 20px; border-radius: 0 3px 3px 0; background: #60a5fa; }
+.logout { padding: 14px 4px; margin: 0 12px; color: #94a3b8; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; border-top: 1px solid rgba(255, 255, 255, .08); }
 .logout .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .logout .act { cursor: pointer; flex-shrink: 0; }
 .logout .act:hover { color: #f87171; }
@@ -91,11 +97,11 @@ body { margin: 0; font-family: system-ui, 'Microsoft YaHei', sans-serif; backgro
 /* 移动端顶栏 */
 /* 移动端顶栏：sticky 跟随，滚动中也能随时打开菜单 */
 .m-header { background: #1d2939; color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 16px; height: 52px; flex-shrink: 0; position: sticky; top: 0; z-index: 10; }
-.m-header .logo { color: #fff; padding: 0; font-size: 17px; }
+.m-header .logo { color: #fff; padding: 0; margin: 0; border-bottom: none; font-size: 17px; }
 .m-header .el-button { color: #fff; }
 .drawer-inner { display: flex; flex-direction: column; height: 100%; }
 .drawer-inner .el-menu { border-right: none; flex: 1; }
-.drawer-inner .logout { color: #64748b; }
+.drawer-inner .logout { color: #64748b; border-top-color: #eef1f6; }
 
 @media (max-width: 768px) {
   .main { padding: 12px; }

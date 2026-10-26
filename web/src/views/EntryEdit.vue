@@ -2,15 +2,33 @@
   <div v-loading="loading">
     <!-- 模板选择（仅新建且未选时） -->
     <el-card v-if="isCreate && !templatePicked" class="tpl-card">
-      <template #header>从模板开始（可选，骨架与注释会自动带出，之后仍可自由增删改）</template>
-      <el-collapse v-model="openGroups">
-        <el-collapse-item v-for="g in groupedTemplates" :key="g.name" :name="g.name" :title="`${g.name}（${g.items.length}）`">
-          <el-button v-for="t in g.items" :key="t.id" class="tpl-btn" @click="applyTemplate(t)">
-            {{ t.name }}<el-tag v-if="!t.builtin" size="small" type="success" style="margin-left: 6px">自建</el-tag>
-          </el-button>
-        </el-collapse-item>
-      </el-collapse>
-      <el-button type="primary" plain style="margin-top: 12px" @click="startBlank">空白开始（完全自由定义）</el-button>
+      <template #header>
+        <div class="tpl-head">
+          <span>从模板开始（可选，骨架与注释会自动带出，之后仍可自由增删改）</span>
+          <el-button type="primary" plain size="small" @click="startBlank">空白开始（完全自由定义）</el-button>
+        </div>
+      </template>
+      <section v-for="g in groupedTemplates" :key="g.name" class="group">
+        <div class="group-head">
+          <span class="group-name">{{ g.name }}</span>
+          <span class="group-count">{{ g.items.length }}</span>
+        </div>
+        <div class="grid">
+          <div v-for="t in g.items" :key="t.id" class="pick-card" role="button" tabindex="0"
+            @click="applyTemplate(t)" @keydown.enter="applyTemplate(t)">
+            <div class="pick-top">
+              <span class="pick-name" :title="t.name">{{ t.name }}</span>
+              <el-tag v-if="!t.builtin" size="small" type="success" effect="light" round>自建</el-tag>
+            </div>
+            <div class="pick-chips">
+              <span v-for="f in t.fields.slice(0, 6)" :key="f.key" class="chip" :class="{ 'chip-sec': f.is_secret }">
+                {{ f.key }}<el-icon v-if="f.is_secret"><Lock /></el-icon>
+              </span>
+              <span v-if="t.fields.length > 6" class="chip chip-more">+{{ t.fields.length - 6 }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
     </el-card>
 
     <!-- 编辑表单 -->
@@ -18,7 +36,7 @@
       <div class="head">
         <h3>{{ isCreate ? '新建条目' : '编辑：' + form.title }}</h3>
         <div>
-          <el-button v-if="!isCreate && hasTOTP" @click="showTOTP">🔑 动态码</el-button>
+          <el-button v-if="!isCreate && hasTOTP" :icon="Timer" @click="showTOTP">动态码</el-button>
           <el-button v-if="!isCreate" @click="saveAsTemplate">另存为模板</el-button>
           <el-button type="primary" :loading="saving" @click="save">保存</el-button>
           <el-button @click="$router.push('/entries')">返回</el-button>
@@ -40,7 +58,7 @@
               <el-tag v-for="tag in form.tags || []" :key="tag" closable @close="form.tags = (form.tags || []).filter((t) => t !== tag)">{{ tag }}</el-tag>
               <el-input v-if="tagInputVisible" ref="tagInputRef" v-model="tagInputValue" size="small" style="width: 110px"
                 placeholder="回车确认" @keyup.enter="addTag" @blur="addTag" />
-              <el-button v-else size="small" @click="showTagInput">＋ 标签</el-button>
+              <el-button v-else size="small" :icon="Plus" @click="showTagInput">标签</el-button>
             </div>
             <span class="hint" style="margin-left: 8px">如：内网 / 公司内网 / 公网，列表可按标签筛选</span>
           </el-form-item>
@@ -57,8 +75,10 @@
 
       <el-card class="fields-card">
         <template #header>
-          字段（每行 = 字段名 / 类型 / 值 / 给 AI 的说明）
-          <el-button size="small" style="float: right" @click="addField">＋ 添加字段</el-button>
+          <div class="tpl-head">
+            <span>字段（每行 = 字段名 / 类型 / 值 / 给 AI 的说明）</span>
+            <el-button size="small" :icon="Plus" @click="addField">添加字段</el-button>
+          </div>
         </template>
 
         <div v-for="(f, i) in form.fields" :key="i" :class="['field-row', { 'field-row-m': isMobile }]">
@@ -98,7 +118,7 @@
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete } from '@element-plus/icons-vue'
+import { Delete, Plus, Lock, Timer } from '@element-plus/icons-vue'
 import { api, Entry, Field, Template } from '../api'
 import { useIsMobile } from '../ui'
 
@@ -111,7 +131,6 @@ const id = Number(route.params.id || 0)
 const loading = ref(false)
 const saving = ref(false)
 const templatePicked = ref(!isCreate)
-const openGroups = ref<string[]>([])
 
 const form = ref<Entry>(blankEntry())
 const templates = ref<Template[]>([])
@@ -261,7 +280,24 @@ onMounted(load)
 <style scoped>
 .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 8px; flex-wrap: wrap; }
 .tpl-card { margin-bottom: 16px; }
-.tpl-btn { margin: 4px; }
+.tpl-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.tpl-head span { font-size: 14px; font-weight: 600; color: #1d2939; }
+
+/* ---- 模板选择：分组 + 卡片网格（与「录入模板」页同构） ---- */
+.group { margin-bottom: 18px; }
+.group-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.group-name { font-size: 14px; font-weight: 600; color: #334155; }
+.group-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: #eef1f6; color: #64748b; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.pick-card { background: #fff; border: 1px solid #e6eaf2; border-radius: 10px; padding: 12px 14px; cursor: pointer; transition: border-color .2s, box-shadow .2s, transform .2s; }
+.pick-card:hover, .pick-card:focus-visible { border-color: #a0cfff; box-shadow: 0 4px 14px rgba(29, 41, 57, .07); transform: translateY(-1px); outline: none; }
+.pick-top { display: flex; align-items: center; gap: 8px; }
+.pick-name { font-size: 14px; font-weight: 600; color: #1d2939; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-chips { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 5px; }
+.chip { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-family: ui-monospace, Consolas, monospace; color: #64748b; background: #f1f5f9; border-radius: 4px; padding: 1px 6px; }
+.chip .el-icon { font-size: 11px; }
+.chip-sec { color: #b45309; background: #fef3e2; }
+.chip-more { color: #94a3b8; background: transparent; border: 1px dashed #e2e8f0; }
 .fields-card { margin-top: 16px; }
 .field-row { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; }
 .c-key { width: 200px; flex-shrink: 0; }
@@ -280,4 +316,8 @@ onMounted(load)
 .field-row-m .c-val, .field-row-m .c-desc, .field-row-m .field-ops { grid-column: 1 / -1; }
 
 .tags-box { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+@media (max-width: 768px) {
+  .grid { grid-template-columns: 1fr; }
+}
 </style>

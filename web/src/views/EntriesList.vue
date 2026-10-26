@@ -5,16 +5,16 @@
       <el-select v-model="category" placeholder="全部分类" clearable style="width: 180px" @change="() => load(true)">
         <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
       </el-select>
-      <el-button type="primary" @click="$router.push('/entries/new')">＋ 新建条目</el-button>
+      <el-button type="primary" :icon="Plus" @click="$router.push('/entries/new')">新建条目</el-button>
       <el-select v-model="tagFilter" placeholder="按标签筛选" clearable style="width: 140px">
         <el-option v-for="t in allTags" :key="t" :label="t" :value="t" />
       </el-select>
       <el-button v-if="me.isAdmin" @click="impDlg = true">导入</el-button>
       <el-button v-if="me.isAdmin" @click="expDlg = true">导出</el-button>
-      <el-button v-if="sel.length" type="danger" :loading="batchDeling" @click="batchDel">🗑 删除选中（{{ sel.length }}）</el-button>
+      <el-button v-if="sel.length" type="danger" :icon="Delete" :loading="batchDeling" @click="batchDel">删除选中（{{ sel.length }}）</el-button>
     </div>
 
-    // 移动端：卡片列表
+    <!-- 移动端：卡片列表 -->
     <div v-if="isMobile" v-loading="loading" class="cards">
       <el-empty v-if="!loading && !entries.length" :description="q || category || tagFilter ? '没有匹配的条目' : '暂无条目'" />
       <el-card v-for="row in paged" :key="row.id" class="card" shadow="hover" @click="open(row)">
@@ -141,6 +141,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Delete } from '@element-plus/icons-vue'
 import { api, Entry } from '../api'
 import { useIsMobile } from '../ui'
 import { ENTRIES_CHANGED_EVENT, me } from '../store'
