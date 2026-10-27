@@ -26,84 +26,94 @@ func Run() int {
 
 	s.AddTool(mcp.NewTool("kh_status",
 		mcp.WithDescription("检查 keyHive 服务连通性、配置文件与令牌配置状态。取密钥失败时先用这个排查。"),
-	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		cfg, err := cli.LoadConfig()
-		if err != nil {
-			return text(err.Error()), nil
-		}
-		return callAndWrap(func() ([]byte, int, error) { return cli.ListEntries(cfg, "") })
-	})
+	), toolStatus)
 
 	s.AddTool(mcp.NewTool("kh_list",
 		mcp.WithDescription("列出 AI 可见的密钥条目。敏感值遮蔽为 ***，但每个字段含用户手写的 description 注释，说明了字段含义与用法。category 可选。"),
 		mcp.WithString("category", mcp.Description("按分类过滤，可省略")),
-	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		cfg, err := requireRead()
-		if err != nil {
-			return text(err.Error()), nil
-		}
-		cat := req.GetString("category", "")
-		return callAndWrap(func() ([]byte, int, error) { return cli.ListEntries(cfg, cat) })
-	})
+	), toolList)
 
 	s.AddTool(mcp.NewTool("kh_search",
 		mcp.WithDescription("按关键词搜索密钥条目（匹配标题/说明/分类），返回遮蔽结果与注释。任务需要任何凭据（docker login、数据库、AK/SK、API key 等）时先用它查库里有没有，而不是问用户要。"),
 		mcp.WithString("query", mcp.Required(), mcp.Description("搜索关键词，中文/英文均可")),
-	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		cfg, err := requireRead()
-		if err != nil {
-			return text(err.Error()), nil
-		}
-		q, err := req.RequireString("query")
-		if err != nil {
-			return text("缺少 query 参数"), nil
-		}
-		return callAndWrap(func() ([]byte, int, error) { return cli.SearchEntries(cfg, q) })
-	})
+	), toolSearch)
 
 	s.AddTool(mcp.NewTool("kh_get",
 		mcp.WithDescription("按 id 取单条密钥条目详情（敏感值遮蔽，注释完整）。id 来自 kh_list/kh_search 结果。"),
 		mcp.WithString("id", mcp.Required(), mcp.Description("条目 id")),
-	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		cfg, err := requireRead()
-		if err != nil {
-			return text(err.Error()), nil
-		}
-		id, err := req.RequireString("id")
-		if err != nil {
-			return text("缺少 id 参数"), nil
-		}
-		return callAndWrap(func() ([]byte, int, error) { return cli.GetEntry(cfg, id) })
-	})
+	), toolGet)
 
 	s.AddTool(mcp.NewTool("kh_reveal",
 		mcp.WithDescription("取某条目单个敏感字段的明文（需 reveal 权限，每次调用记录审计）。只在确需明文执行任务（如 docker login）时使用；返回值不要写入文件/git/对话正文。"+discipline),
 		mcp.WithString("id", mcp.Required(), mcp.Description("条目 id")),
 		mcp.WithString("field", mcp.Required(), mcp.Description("字段名（条目 fields 里的 key）")),
-	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		cfg, err := cli.LoadConfig()
-		if err != nil {
-			return text(err.Error()), nil
-		}
-		if cfg.TokenReveal == "" {
-			return text("token_reveal 未配置。请到 keyHive Web UI「AI 令牌」页创建（勾选 reveal）并填入 " + cli.ConfigPath()), nil
-		}
-		id, err := req.RequireString("id")
-		if err != nil {
-			return text("缺少 id 参数"), nil
-		}
-		field, err := req.RequireString("field")
-		if err != nil {
-			return text("缺少 field 参数"), nil
-		}
-		return callAndWrap(func() ([]byte, int, error) { return cli.RevealField(cfg, id, field) })
-	})
+	), toolReveal)
 
 	if err := server.ServeStdio(s); err != nil {
 		fmt.Fprintln(os.Stderr, "MCP server 错误:", err)
 		return 1
 	}
 	return 0
+}
+
+func toolStatus(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		return text(err.Error()), nil
+	}
+	return callAndWrap(func() ([]byte, int, error) { return cli.ListEntries(cfg, "") })
+}
+
+func toolList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	cfg, err := requireRead()
+	if err != nil {
+		return text(err.Error()), nil
+	}
+	cat := req.GetString("category", "")
+	return callAndWrap(func() ([]byte, int, error) { return cli.ListEntries(cfg, cat) })
+}
+
+func toolSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	cfg, err := requireRead()
+	if err != nil {
+		return text(err.Error()), nil
+	}
+	q, err := req.RequireString("query")
+	if err != nil {
+		return text("缺少 query 参数"), nil
+	}
+	return callAndWrap(func() ([]byte, int, error) { return cli.SearchEntries(cfg, q) })
+}
+
+func toolGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	cfg, err := requireRead()
+	if err != nil {
+		return text(err.Error()), nil
+	}
+	id, err := req.RequireString("id")
+	if err != nil {
+		return text("缺少 id 参数"), nil
+	}
+	return callAndWrap(func() ([]byte, int, error) { return cli.GetEntry(cfg, id) })
+}
+
+func toolReveal(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		return text(err.Error()), nil
+	}
+	if cfg.TokenReveal == "" {
+		return text("token_reveal 未配置。请到 keyHive Web UI「AI 令牌」页创建（勾选 reveal）并填入 " + cli.ConfigPath()), nil
+	}
+	id, err := req.RequireString("id")
+	if err != nil {
+		return text("缺少 id 参数"), nil
+	}
+	field, err := req.RequireString("field")
+	if err != nil {
+		return text("缺少 field 参数"), nil
+	}
+	return callAndWrap(func() ([]byte, int, error) { return cli.RevealField(cfg, id, field) })
 }
 
 func requireRead() (*cli.Config, error) {

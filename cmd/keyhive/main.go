@@ -28,46 +28,69 @@ import (
 
 func main() {
 	// 子命令：无参数或 serve 启动服务；list/.../rotate-key 为客户端；mcp 为 stdio MCP server
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "serve":
-			// 继续启动服务
-		case "login", "list", "search", "get", "reveal", "status", "add", "edit", "totp", "export", "import", "rotate-key", "help", "-h", "--help":
-			os.Exit(cli.Run(os.Args[1:]))
-		case "version", "-v", "--version":
-			fmt.Println(version.String())
-			return
-		case "mcp":
-			os.Exit(mcpserver.Run())
-		default:
-			log.Fatalf("未知子命令: %s（keyhive help 查看用法）", os.Args[1])
-		}
+	if code := dispatch(os.Args[1:]); code >= 0 {
+		os.Exit(code)
 	}
 	runServe()
+}
+
+// dispatch 子命令分发：返回 -1 表示继续启动服务
+func dispatch(args []string) int {
+	if len(args) == 0 {
+		return -1
+	}
+	switch args[0] {
+	case "serve":
+		return -1
+	case "login", "list", "search", "get", "reveal", "status", "add", "edit", "totp", "export", "import", "rotate-key", "help", "-h", "--help":
+		return cli.Run(args)
+	case "version", "-v", "--version":
+		fmt.Println(version.String())
+		return 0
+	case "mcp":
+		return mcpserver.Run()
+	default:
+		log.Fatalf("未知子命令: %s（keyhive help 查看用法）", args[0])
+		return 2
+	}
 }
 
 func runServe() {
 	addr := envOr("KEYHIVE_ADDR", ":8020")
 	dataDir := envOr("KEYHIVE_DATA", "./data")
 
+	srv, db, err := buildServer(dataDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+	log.Printf("keyHive 启动完成: http://localhost%s (数据目录 %s)", addr, dataDir)
+	if err := http.ListenAndServe(addr, srv.Handler); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// buildServer 组装完整服务（数据库 + 主密钥 + 全部路由），runServe 与测试共用；
+// 返回的 *sql.DB 由调用方负责关闭
+func buildServer(dataDir string) (*http.Server, *sql.DB, error) {
 	// 主密钥与库分离；库内 settings.key_check 用于校验二者匹配
 	keySrc, err := crypto.LoadMasterKey(dataDir)
 	if err != nil {
-		log.Fatalf("加载主密钥失败: %v", err)
+		return nil, nil, fmt.Errorf("加载主密钥失败: %w", err)
 	}
 	cipherBox, err := crypto.New(keySrc.Key)
 	if err != nil {
-		log.Fatalf("初始化加密失败: %v", err)
+		return nil, nil, fmt.Errorf("初始化加密失败: %w", err)
 	}
 	log.Printf("keyHive %s | 主密钥来源: %s", version.String(), keySrc.Desc)
 
 	database, err := kdb.Open(dataDir + "/keyhive.db")
 	if err != nil {
-		log.Fatalf("打开数据库失败: %v", err)
+		return nil, nil, fmt.Errorf("打开数据库失败: %w", err)
 	}
-	defer database.Close()
 	if err := ensureKeyCheck(database, cipherBox); err != nil {
-		log.Fatalf("%v", err)
+		database.Close()
+		return nil, nil, err
 	}
 
 	st := &store.Store{
@@ -116,10 +139,7 @@ func runServe() {
 	dist, _ := fs.Sub(web.Dist, "dist")
 	r.Handle("/*", spaHandler(dist))
 
-	log.Printf("keyHive 启动完成: http://localhost%s (数据目录 %s)", addr, dataDir)
-	if err := http.ListenAndServe(addr, r); err != nil {
-		log.Fatal(err)
-	}
+	return &http.Server{Handler: r}, database, nil
 }
 
 // ensureKeyCheck 首次写入校验值；已有则校验主密钥匹配

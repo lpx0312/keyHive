@@ -3,6 +3,8 @@ package importer
 import (
 	"strings"
 	"testing"
+
+	"github.com/lpx0312/keyHive/internal/model"
 )
 
 const keyhiveExport = `[
@@ -76,5 +78,19 @@ func TestParseKeyhiveBOMAndEmptySecret(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Fields[0].Value != "" {
 		t.Fatalf("BOM + 空敏感值应可导入: %+v", entries)
+	}
+}
+
+func TestKeyhiveUsername(t *testing.T) {
+	withUser := &model.Entry{Fields: []model.Field{{Key: "username", Value: "  lipanx "}}}
+	if got := KeyhiveUsername(withUser); got != "lipanx" {
+		t.Fatalf("username 应 trim: %q", got)
+	}
+	without := &model.Entry{Fields: []model.Field{{Key: "password", Value: "x"}}}
+	if got := KeyhiveUsername(without); got != "" {
+		t.Fatalf("无 username 应空串: %q", got)
+	}
+	if got := KeyhiveUsername(&model.Entry{}); got != "" {
+		t.Fatalf("无字段应空串: %q", got)
 	}
 }
