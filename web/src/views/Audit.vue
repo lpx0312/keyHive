@@ -1,32 +1,40 @@
 <template>
   <div>
-    <div class="toolbar">
-      <h3>审计日志</h3>
-      <el-select v-model="action" placeholder="全部动作" clearable style="width: 200px">
-        <el-option v-for="a in actions" :key="a.v" :label="a.l" :value="a.v" />
-      </el-select>
+    <div class="page-head">
+      <div class="page-title">
+        <h3>审计日志</h3>
+        <p class="page-tip">敏感值取用、登录与管理操作全量留痕；按动作筛选，翻页自动加载。</p>
+      </div>
+      <div class="page-actions">
+        <el-select v-model="action" placeholder="全部动作" clearable style="width: 200px">
+          <el-option v-for="a in actions" :key="a.v" :label="a.l" :value="a.v" />
+        </el-select>
+      </div>
     </div>
-    <el-table :data="logs" v-loading="loading">
-      <el-table-column prop="created_at" label="时间" width="170" :formatter="fmt" />
-      <el-table-column label="操作者" width="160">
-        <template #default="{ row }">
-          <el-tag size="small" :type="row.actor_type === 'token' ? 'warning' : 'info'">{{ row.actor_type }}</el-tag>
-          {{ row.actor_name || row.actor_id }}
-        </template>
-      </el-table-column>
-      <el-table-column label="动作" width="140">
-        <template #default="{ row }">
-          <el-tag size="small" :type="row.action === 'field_reveal' ? 'danger' : ''">{{ label(row.action) }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="detail" label="详情" min-width="280" show-overflow-tooltip />
-      <el-table-column prop="ip" label="来源 IP" width="140" />
-    </el-table>
 
-    <!-- 分页：后端 limit/offset 真分页（审计流水只增，量级会持续涨，与条目列表的本地分页不同） -->
-    <el-pagination v-if="total" class="pager" v-model:current-page="page" v-model:page-size="pageSize"
-      :page-sizes="[5, 10, 15, 20, 50]" :total="total" :small="isMobile"
-      :layout="isMobile ? 'prev, pager, next' : 'total, sizes, prev, pager, next'" />
+    <div class="panel">
+      <el-table :data="logs" v-loading="loading">
+        <el-table-column prop="created_at" label="时间" width="170" :formatter="fmt" />
+        <el-table-column label="操作者" width="160">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.actor_type === 'token' ? 'warning' : 'info'" effect="light" round>{{ row.actor_type }}</el-tag>
+            {{ row.actor_name || row.actor_id }}
+          </template>
+        </el-table-column>
+        <el-table-column label="动作" width="140">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.action === 'field_reveal' ? 'danger' : ''" effect="light" round>{{ label(row.action) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="detail" label="详情" min-width="280" show-overflow-tooltip />
+        <el-table-column prop="ip" label="来源 IP" width="140" />
+      </el-table>
+
+      <!-- 分页：后端 limit/offset 真分页（审计流水只增，量级会持续涨，与条目列表的本地分页不同） -->
+      <el-pagination v-if="total" class="pager" v-model:current-page="page" v-model:page-size="pageSize"
+        :page-sizes="[5, 10, 15, 20, 50]" :total="total" :small="isMobile"
+        :layout="isMobile ? 'prev, pager, next' : 'total, sizes, prev, pager, next'" />
+    </div>
   </div>
 </template>
 
@@ -99,7 +107,6 @@ onMounted(load)
 </script>
 
 <style scoped>
-.toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .pager { margin-top: 14px; display: flex; justify-content: flex-end; }
 @media (max-width: 768px) { .pager { justify-content: center; } }
 </style>

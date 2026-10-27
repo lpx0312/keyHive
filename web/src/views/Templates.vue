@@ -4,7 +4,7 @@
     <div class="page-head">
       <div class="page-title">
         <h3>录入模板</h3>
-        <p class="tip">内置模板覆盖常见运维场景；在条目编辑页「另存为模板」可沉淀自己的结构。</p>
+        <p class="page-tip">内置模板覆盖常见运维场景；在条目编辑页「另存为模板」可沉淀自己的结构。</p>
       </div>
       <div class="page-actions">
         <el-input v-model="q" placeholder="搜索模板 / 字段" clearable :prefix-icon="Search" class="search" />
@@ -211,18 +211,11 @@ onMounted(load)
 </script>
 
 <style scoped>
-/* ---- 页头 ---- */
-.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
-.page-title h3 { margin: 0 0 4px; font-size: 19px; }
-.tip { color: #94a3b8; font-size: 13px; margin: 0; }
-.page-actions { display: flex; gap: 10px; align-items: center; }
+/* 页头/分组/操作区样式在全局 base.css */
 .search { width: 220px; }
 
-/* ---- 分组 ---- */
+/* ---- 分组（.group-head/.group-name/.group-count 在全局 base.css） ---- */
 .group { margin-bottom: 22px; }
-.group-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.group-name { font-size: 14px; font-weight: 600; color: #334155; }
-.group-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: #eef1f6; color: #64748b; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
 
 /* ---- 卡片网格 ---- */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 12px; }

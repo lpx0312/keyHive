@@ -51,7 +51,14 @@ async function login() {
 </script>
 
 <style scoped>
-.wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #1d2939; }
-.card { width: min(360px, 92vw); }
+.wrap {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background:
+    radial-gradient(1100px 520px at 72% -12%, rgba(76, 118, 178, .5) 0%, transparent 60%),
+    radial-gradient(900px 520px at -12% 112%, rgba(46, 91, 143, .45) 0%, transparent 55%),
+    #1d2939;
+}
+.card { width: min(360px, 92vw); border: none; border-radius: 14px; box-shadow: 0 18px 48px rgba(2, 8, 20, .45); padding: 10px 6px 4px; }
+.card h2 { text-align: center; font-size: 20px; margin: 8px 0 20px; }
 .tip { color: #94a3b8; font-size: 12px; text-align: center; }
 </style>

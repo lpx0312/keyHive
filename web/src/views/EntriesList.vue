@@ -1,17 +1,23 @@
 <template>
   <div>
-    <div class="toolbar">
-      <el-input v-model="q" placeholder="搜索标题 / 说明 / 分类" clearable style="width: 260px" @input="() => load(true)" />
-      <el-select v-model="category" placeholder="全部分类" clearable style="width: 180px" @change="() => load(true)">
-        <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
-      </el-select>
-      <el-button type="primary" :icon="Plus" @click="$router.push('/entries/new')">新建条目</el-button>
-      <el-select v-model="tagFilter" placeholder="按标签筛选" clearable style="width: 140px">
-        <el-option v-for="t in allTags" :key="t" :label="t" :value="t" />
-      </el-select>
-      <el-button v-if="me.isAdmin" @click="impDlg = true">导入</el-button>
-      <el-button v-if="me.isAdmin" @click="expDlg = true">导出</el-button>
-      <el-button v-if="sel.length" type="danger" :icon="Delete" :loading="batchDeling" @click="batchDel">删除选中（{{ sel.length }}）</el-button>
+    <div class="page-head">
+      <div class="page-title">
+        <h3>密钥条目</h3>
+        <p class="page-tip">共 {{ entries.length }} 条 · 敏感字段加密存储，取用明文均记审计。</p>
+      </div>
+      <div class="page-actions">
+        <el-input v-model="q" placeholder="搜索标题 / 说明 / 分类" clearable style="width: 220px" @input="() => load(true)" />
+        <el-select v-model="category" placeholder="全部分类" clearable style="width: 150px" @change="() => load(true)">
+          <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
+        </el-select>
+        <el-select v-model="tagFilter" placeholder="按标签筛选" clearable style="width: 130px">
+          <el-option v-for="t in allTags" :key="t" :label="t" :value="t" />
+        </el-select>
+        <el-button type="primary" :icon="Plus" @click="$router.push('/entries/new')">新建条目</el-button>
+        <el-button v-if="me.isAdmin" @click="impDlg = true">导入</el-button>
+        <el-button v-if="me.isAdmin" @click="expDlg = true">导出</el-button>
+        <el-button v-if="sel.length" type="danger" :icon="Delete" :loading="batchDeling" @click="batchDel">删除选中（{{ sel.length }}）</el-button>
+      </div>
     </div>
 
     <!-- 移动端：卡片列表 -->
@@ -41,7 +47,8 @@
     </div>
 
     <!-- 桌面：表格 -->
-    <el-table v-else :data="paged" v-loading="loading" @row-click="open" @selection-change="sel = $event">
+    <div v-else class="panel">
+      <el-table :data="paged" v-loading="loading" @row-click="open" @selection-change="sel = $event">
       <el-table-column type="selection" width="42" />
       <el-table-column prop="title" label="标题" min-width="180">
         <template #default="{ row }">
@@ -79,14 +86,15 @@
           <span v-else>{{ fmtTime(null, null, row.updated_at) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="185" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" @click.stop="open(row)">编辑</el-button>
-          <el-button size="small" @click.stop="copyEntry(row)">复制</el-button>
-          <el-button size="small" type="danger" @click.stop="del(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+          <el-table-column label="操作" width="185" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" @click.stop="open(row)">编辑</el-button>
+              <el-button size="small" @click.stop="copyEntry(row)">复制</el-button>
+              <el-button size="small" type="danger" @click.stop="del(row)">删除</el-button>
+            </template>
+          </el-table-column>
+      </el-table>
+    </div>
 
     <!-- 分页：本地分页（全量加载后切片），标签筛选/总数统计依赖全量数据 -->
     <el-pagination v-if="filtered.length" class="pager" v-model:current-page="page" v-model:page-size="pageSize"
@@ -362,7 +370,6 @@ onMounted(() => { load(); loadStaleDays() })
 </script>
 
 <style scoped>
-.toolbar { display: flex; gap: 12px; margin-bottom: 16px; }
 .pager { margin-top: 14px; display: flex; justify-content: flex-end; }
 .sec { color: #e6a23c; font-size: 12px; }
 .stale { color: #e6a23c; cursor: help; }
@@ -382,8 +389,8 @@ onMounted(() => { load(); loadStaleDays() })
 .card-actions { margin-top: 10px; display: flex; justify-content: flex-end; gap: 8px; }
 
 @media (max-width: 768px) {
-  .toolbar { flex-wrap: wrap; }
-  .toolbar .el-input, .toolbar .el-select { width: 100% !important; }
+  .page-actions { width: 100%; }
+  .page-actions .el-input, .page-actions .el-select { width: 100% !important; }
   .pager { justify-content: center; }
 }
 

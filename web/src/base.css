@@ -1,0 +1,17 @@
+/* 全站统一设计语言基座：与「录入模板」页同构
+   page-head = 页头（标题 + 副标题 + 右侧操作）
+   panel     = 白底圆角容器（包表格/分页）
+   group-*   = 分组头（分组名 + 计数徽章） */
+
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+.page-title h3 { margin: 0 0 4px; font-size: 19px; }
+.page-tip { color: #94a3b8; font-size: 13px; margin: 0; }
+
+.panel { background: #fff; border: 1px solid #e6eaf2; border-radius: 10px; padding: 14px 16px; }
+.panel .el-table { border-radius: 8px; }
+
+.group-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.group-name { font-size: 14px; font-weight: 600; color: #334155; }
+.group-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: #eef1f6; color: #64748b; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
+
+.page-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }

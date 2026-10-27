@@ -44,6 +44,9 @@
       </div>
 
       <el-card>
+        <template #header>
+          <div class="tpl-head"><span>基本信息</span></div>
+        </template>
         <el-form :label-position="isMobile ? 'top' : 'right'" :label-width="isMobile ? '' : '90px'">
           <el-form-item label="标题" required>
             <el-input v-model="form.title" placeholder="如：华为SWR-杭州-生产" />
@@ -283,11 +286,8 @@ onMounted(load)
 .tpl-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .tpl-head span { font-size: 14px; font-weight: 600; color: #1d2939; }
 
-/* ---- 模板选择：分组 + 卡片网格（与「录入模板」页同构） ---- */
+/* ---- 模板选择：分组 + 卡片网格（分组样式在全局 base.css，与「录入模板」页同构） ---- */
 .group { margin-bottom: 18px; }
-.group-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.group-name { font-size: 14px; font-weight: 600; color: #334155; }
-.group-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: #eef1f6; color: #64748b; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
 .pick-card { background: #fff; border: 1px solid #e6eaf2; border-radius: 10px; padding: 12px 14px; cursor: pointer; transition: border-color .2s, box-shadow .2s, transform .2s; }
 .pick-card:hover, .pick-card:focus-visible { border-color: #a0cfff; box-shadow: 0 4px 14px rgba(29, 41, 57, .07); transform: translateY(-1px); outline: none; }
@@ -299,7 +299,7 @@ onMounted(load)
 .chip-sec { color: #b45309; background: #fef3e2; }
 .chip-more { color: #94a3b8; background: transparent; border: 1px dashed #e2e8f0; }
 .fields-card { margin-top: 16px; }
-.field-row { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; }
+.field-row { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; background: #f8fafc; border: 1px solid #eef1f6; border-radius: 8px; padding: 10px 12px; }
 .c-key { width: 200px; flex-shrink: 0; }
 .c-type { width: 90px; flex-shrink: 0; }
 .c-val { flex: 1; }
@@ -311,8 +311,8 @@ onMounted(load)
 .totp-code { font-size: 40px; font-weight: 700; letter-spacing: 8px; text-align: center; font-family: monospace; }
 .totp-hint { color: #94a3b8; font-size: 12px; text-align: center; }
 
-/* 移动端：字段卡片（字段名+类型一行，值/说明/操作各占整行） */
-.field-row-m { display: grid; grid-template-columns: 58% 1fr; gap: 6px; border: 1px solid #e4e7ed; border-radius: 8px; padding: 10px; margin-bottom: 10px; background: #fafbfc; }
+/* 移动端：字段卡片（字段名+类型一行，值/说明/操作各占整行）；底色边框由 .field-row 提供 */
+.field-row-m { display: grid; grid-template-columns: 58% 1fr; gap: 6px; }
 .field-row-m .c-val, .field-row-m .c-desc, .field-row-m .field-ops { grid-column: 1 / -1; }
 
 .tags-box { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

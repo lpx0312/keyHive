@@ -1,37 +1,42 @@
 <template>
   <div>
-    <div class="toolbar">
-      <h3>用户管理</h3>
-      <el-button type="primary" @click="dlg = true">＋ 新建用户</el-button>
+    <div class="page-head">
+      <div class="page-title">
+        <h3>用户管理</h3>
+        <p class="page-tip">所有用户共享同一个密钥库；普通用户可管理条目与模板，用户管理 / AI 令牌 / 审计日志仅管理员可用。</p>
+      </div>
+      <div class="page-actions">
+        <el-button type="primary" :icon="Plus" @click="dlg = true">新建用户</el-button>
+      </div>
     </div>
-    <el-alert type="info" :closable="false" style="margin-bottom: 16px"
-      title="所有用户共享同一个密钥库；普通用户可管理条目与模板，用户管理 / AI 令牌 / 审计日志仅管理员可用。" />
 
-    <el-table :data="users" v-loading="loading">
-      <el-table-column prop="username" label="用户名" min-width="140">
-        <template #default="{ row }">
-          <b>{{ row.username }}</b>
-          <el-tag v-if="row.is_admin" size="small" type="danger" style="margin-left: 6px">管理员</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="状态" width="100">
-        <template #default="{ row }">
-          <el-tag v-if="row.disabled" type="info" size="small">已禁用</el-tag>
-          <el-tag v-else type="success" size="small">正常</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="created_at" label="创建时间" width="170" :formatter="fmt" />
-      <el-table-column label="操作" width="320" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" @click="resetPW(row)">重置密码</el-button>
-          <el-button size="small" :type="row.disabled ? 'success' : 'warning'" @click="toggle(row)">
-            {{ row.disabled ? '启用' : '禁用' }}
-          </el-button>
-          <el-button size="small" @click="toggleAdmin(row)">{{ row.is_admin ? '降为普通' : '设为管理员' }}</el-button>
-          <el-button size="small" type="danger" @click="del(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <div class="panel">
+      <el-table :data="users" v-loading="loading">
+        <el-table-column prop="username" label="用户名" min-width="140">
+          <template #default="{ row }">
+            <b>{{ row.username }}</b>
+            <el-tag v-if="row.is_admin" size="small" type="danger" effect="light" round style="margin-left: 6px">管理员</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.disabled" type="info" size="small" effect="light" round>已禁用</el-tag>
+            <el-tag v-else type="success" size="small" effect="light" round>正常</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="创建时间" width="170" :formatter="fmt" />
+        <el-table-column label="操作" width="320" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" @click="resetPW(row)">重置密码</el-button>
+            <el-button size="small" :type="row.disabled ? 'success' : 'warning'" @click="toggle(row)">
+              {{ row.disabled ? '启用' : '禁用' }}
+            </el-button>
+            <el-button size="small" @click="toggleAdmin(row)">{{ row.is_admin ? '降为普通' : '设为管理员' }}</el-button>
+            <el-button size="small" type="danger" @click="del(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
 
     <el-dialog v-model="dlg" title="新建用户" width="420px">
       <el-form label-width="80px">
@@ -56,6 +61,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
 import { api, User } from '../api'
 
 const users = ref<User[]>([])
@@ -125,5 +131,4 @@ onMounted(load)
 </script>
 
 <style scoped>
-.toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 </style>

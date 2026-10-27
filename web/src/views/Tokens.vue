@@ -1,33 +1,39 @@
 <template>
   <div>
-    <div class="toolbar">
-      <h3>AI 访问令牌</h3>
-      <el-button type="primary" @click="dlg = true">＋ 新建令牌</el-button>
+    <div class="page-head">
+      <div class="page-title">
+        <h3>AI 访问令牌</h3>
+        <p class="page-tip">令牌明文只在创建时显示一次。read=可读条目结构与注释（敏感值遮蔽）；search=可搜索；reveal=可取敏感字段明文（每次取用均记审计）。</p>
+      </div>
+      <div class="page-actions">
+        <el-button type="primary" :icon="Plus" @click="dlg = true">新建令牌</el-button>
+      </div>
     </div>
-    <el-alert type="info" :closable="false" style="margin-bottom: 16px"
-      title="令牌明文只在创建时显示一次。read=可读条目结构与注释（敏感值遮蔽）；search=可搜索；reveal=可取敏感字段明文（每次取用均记审计）。" />
 
-    <el-table :data="tokens">
-      <el-table-column prop="name" label="名称" width="160" />
-      <el-table-column label="权限" width="220">
-        <template #default="{ row }">
-          <el-tag v-for="s in row.scopes" :key="s" size="small" :type="s === 'reveal' ? 'danger' : 'info'" style="margin-right: 4px">{{ s }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="created_at" label="创建时间" width="170" :formatter="fmt" />
-      <el-table-column prop="last_used_at" label="最后使用" width="170" :formatter="fmt" />
-      <el-table-column label="状态" width="90">
-        <template #default="{ row }">
-          <el-tag v-if="row.revoked_at" type="info" size="small">已吊销</el-tag>
-          <el-tag v-else type="success" size="small">有效</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="100">
-        <template #default="{ row }">
-          <el-button v-if="!row.revoked_at" size="small" type="danger" @click="revoke(row)">吊销</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <div class="panel">
+      <el-table :data="tokens">
+        <el-table-column prop="name" label="名称" width="160" />
+        <el-table-column label="权限" width="220">
+          <template #default="{ row }">
+            <el-tag v-for="s in row.scopes" :key="s" size="small" :type="s === 'reveal' ? 'danger' : 'info'"
+              effect="light" round style="margin-right: 4px">{{ s }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="创建时间" width="170" :formatter="fmt" />
+        <el-table-column prop="last_used_at" label="最后使用" width="170" :formatter="fmt" />
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag v-if="row.revoked_at" type="info" size="small" effect="light" round>已吊销</el-tag>
+            <el-tag v-else type="success" size="small" effect="light" round>有效</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="100">
+          <template #default="{ row }">
+            <el-button v-if="!row.revoked_at" size="small" type="danger" @click="revoke(row)">吊销</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
 
     <el-dialog v-model="dlg" title="新建 AI 令牌" width="460px">
       <el-form label-width="80px">
@@ -63,6 +69,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
 import { api, APIToken } from '../api'
 import { copyText } from '../ui'
 
@@ -116,6 +123,5 @@ onMounted(load)
 </script>
 
 <style scoped>
-.toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .warn { color: #f56c6c; font-size: 13px; }
 </style>

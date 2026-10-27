@@ -1,10 +1,15 @@
 <template>
   <div>
-    <h3>设置</h3>
+    <div class="page-head">
+      <div class="page-title">
+        <h3>设置</h3>
+        <p class="page-tip">账号密码、AI 录入助手、轮换提醒与主密钥管理。</p>
+      </div>
+    </div>
 
-    <el-card style="max-width: 520px">
-      <template #header>修改密码</template>
-      <el-form label-width="90px">
+    <el-card class="sec-card">
+      <template #header><span class="sec-title">修改密码</span></template>
+      <el-form label-width="90px" class="sec-form">
         <el-form-item label="旧密码">
           <el-input v-model="oldPw" type="password" show-password />
         </el-form-item>
@@ -18,9 +23,9 @@
       </el-form>
     </el-card>
 
-    <el-card style="max-width: 520px; margin-top: 16px">
-      <template #header>界面</template>
-      <el-form label-width="120px">
+    <el-card class="sec-card">
+      <template #header><span class="sec-title">界面</span></template>
+      <el-form label-width="120px" class="sec-form">
         <el-form-item label="AI 助手悬浮球">
           <el-switch v-model="fabVisible" @change="onFabVisibleChange" />
         </el-form-item>
@@ -28,13 +33,15 @@
       <p class="tip">悬浮球可拖动到任意位置避开遮挡；在悬浮球上长按或右键也可直接隐藏（隐藏后在此重新开启）。</p>
     </el-card>
 
-    <el-card style="max-width: 520px; margin-top: 16px">
+    <el-card class="sec-card">
       <template #header>
-        AI 录入助手配置
-        <el-tag v-if="aiCfg.configured === 'true'" type="success" size="small" style="margin-left: 8px">已配置</el-tag>
-        <el-tag v-else type="info" size="small" style="margin-left: 8px">未配置</el-tag>
+        <div class="head-row">
+          <span class="sec-title">AI 录入助手配置</span>
+          <el-tag v-if="aiCfg.configured === 'true'" type="success" size="small" effect="light" round>已配置</el-tag>
+          <el-tag v-else type="info" size="small" effect="light" round>未配置</el-tag>
+        </div>
       </template>
-      <el-form label-width="90px">
+      <el-form label-width="90px" class="sec-form">
         <el-form-item label="协议">
           <el-radio-group v-model="aiCfg.protocol" @change="onProtocolChange">
             <el-radio value="openai">OpenAI 兼容</el-radio>
@@ -74,8 +81,8 @@
         <el-alert v-if="testResult" :type="testResult.ok ? 'success' : 'error'" :closable="true"
           style="margin-top: 10px" @close="testResult = null">
           <template #title>
-            <span v-if="testResult.ok">✅ 连接成功{{ latencyText }}</span>
-            <span v-else>❌ 连接失败{{ latencyText }}</span>
+            <span v-if="testResult.ok" class="tr-ok"><el-icon><CircleCheckFilled /></el-icon>连接成功{{ latencyText }}</span>
+            <span v-else class="tr-fail"><el-icon><CircleCloseFilled /></el-icon>连接失败{{ latencyText }}</span>
           </template>
           <div v-if="testResult.ok" class="test-detail">
             <div>{{ protocolLabel }} 协议 · 模型 {{ testResult.model || '-' }}</div>
@@ -87,9 +94,9 @@
       <p class="tip">Key 用主密钥加密存储。聊天解析时，你输入的内容（含密码）会发送到该 LLM 服务商；高敏凭据建议仍用表单录入。</p>
     </el-card>
 
-    <el-card v-if="me.isAdmin" style="max-width: 520px; margin-top: 16px">
-      <template #header>密码轮换提醒</template>
-      <el-form label-width="90px" inline>
+    <el-card v-if="me.isAdmin" class="sec-card">
+      <template #header><span class="sec-title">密码轮换提醒</span></template>
+      <el-form label-width="90px" inline class="sec-form">
         <el-form-item label="提醒阈值">
           <el-input-number v-model="staleDays" :min="7" :max="3650" />
           <span class="tip" style="margin-left: 8px">天未更新则提醒</span>
@@ -99,10 +106,12 @@
       <p class="tip">条目列表中超过该天数未更新的条目会显示橙色 ⚠️ 提醒。</p>
     </el-card>
 
-    <el-card v-if="me.isAdmin" style="max-width: 520px; margin-top: 16px">
+    <el-card v-if="me.isAdmin" class="sec-card">
       <template #header>
-        主密钥轮换
-        <el-tag type="danger" size="small" style="margin-left: 8px">高危操作</el-tag>
+        <div class="head-row">
+          <span class="sec-title">主密钥轮换</span>
+          <el-tag type="danger" size="small" effect="light" round>高危操作</el-tag>
+        </div>
       </template>
       <p class="tip">用新主密钥重加密全部条目。怀疑密钥泄露时使用；操作已记审计。</p>
       <el-alert type="warning" :closable="false" style="margin-bottom: 12px"
@@ -127,6 +136,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { CircleCheckFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { me, setFabHidden } from '../store'
 
@@ -312,6 +322,15 @@ onMounted(() => { loadAI(); loadStale(); loadVersion() })
 </script>
 
 <style scoped>
+.sec-card { max-width: 560px; margin-bottom: 16px; border-radius: 10px; border-color: #e6eaf2; }
+.sec-card :deep(.el-card__header) { padding: 12px 16px; }
+.sec-title { font-size: 14px; font-weight: 600; color: #1d2939; }
+.head-row { display: flex; align-items: center; gap: 8px; }
+.sec-form { max-width: 460px; }
+.tr-ok { display: inline-flex; align-items: center; gap: 4px; }
+.tr-ok .el-icon { color: #67c23a; }
+.tr-fail { display: inline-flex; align-items: center; gap: 4px; }
+.tr-fail .el-icon { color: #f56c6c; }
 .tip { color: #94a3b8; font-size: 12px; margin-top: 8px; }
 .version { color: #94a3b8; font-size: 12px; margin-top: 24px; }
 .mk { word-break: break-all; background: #fef0f0; padding: 0 4px; border-radius: 3px; }
