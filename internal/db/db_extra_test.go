@@ -99,20 +99,16 @@ func TestMigratePreferAdminNamedUser(t *testing.T) {
 	}
 }
 
-// Open 到不可写位置 → 报错（跨平台：两种路径在 Windows/Linux 均必然失败）
+// Open 到不可写位置 → 报错（跨平台：modernc 驱动会自动创建缺失的父目录，
+// 因此用"普通文件占用父路径"构造 Windows/Linux 均必然失败的路径）
 func TestOpenBadPath(t *testing.T) {
 	dir := t.TempDir()
-	// 父目录不存在：SQLite 不会自动建目录
-	if _, err := Open(filepath.Join(dir, "noexist", "x.db")); err == nil {
-		t.Fatal("父目录不存在应报错")
-	}
-	// 普通文件被当目录用
 	f := filepath.Join(dir, "afile")
 	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Open(filepath.Join(f, "x.db")); err == nil {
-		t.Fatal("文件作为父目录应报错")
+		t.Fatal("父路径被普通文件占用应报错")
 	}
 }
 
