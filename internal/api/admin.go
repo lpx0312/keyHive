@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -18,7 +17,7 @@ import (
 func (s *Server) listTemplates(w http.ResponseWriter, r *http.Request) {
 	list, err := s.Store.ListTemplates()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 	if list == nil {
@@ -30,7 +29,7 @@ func (s *Server) listTemplates(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createTemplate(w http.ResponseWriter, r *http.Request) {
 	var t model.Template
 	if err := readBody(r, &t); err != nil {
-		writeErr(w, 400, "请求格式错误")
+		writeReadErr(w, err)
 		return
 	}
 	if err := s.Store.SaveTemplate(&t); err != nil {
@@ -39,7 +38,7 @@ func (s *Server) createTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	uid, _ := auth.UserID(r.Context())
 	audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionTemplateSave, nil,
-		`{"template":"`+t.Name+`"}`, clientIP(r))
+		audit.Detail(map[string]any{"template": t.Name}), clientIP(r))
 	writeJSON(w, 201, t)
 }
 
@@ -51,7 +50,7 @@ func (s *Server) updateTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	var in model.Template
 	if err := readBody(r, &in); err != nil {
-		writeErr(w, 400, "请求格式错误")
+		writeReadErr(w, err)
 		return
 	}
 	if strings.TrimSpace(in.Name) != "" {
@@ -72,7 +71,7 @@ func (s *Server) updateTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	uid, _ := auth.UserID(r.Context())
 	audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionTemplateSave, nil,
-		`{"template":"`+t.Name+`","id":`+fmt.Sprintf("%d", t.ID)+`}`, clientIP(r))
+		audit.Detail(map[string]any{"template": t.Name, "id": t.ID}), clientIP(r))
 	writeJSON(w, 200, t)
 }
 
@@ -88,12 +87,12 @@ func (s *Server) deleteTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.Store.DeleteTemplate(id); err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 	uid, _ := auth.UserID(r.Context())
 	audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionTemplateDel, nil,
-		`{"template":"`+t.Name+`"}`, clientIP(r))
+		audit.Detail(map[string]any{"template": t.Name}), clientIP(r))
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -102,7 +101,7 @@ func (s *Server) deleteTemplate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listTokens(w http.ResponseWriter, r *http.Request) {
 	list, err := auth.ListAPITokens(s.Store.DB)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 	if list == nil {
@@ -118,7 +117,7 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt *string  `json:"expires_at"`
 	}
 	if err := readBody(r, &req); err != nil {
-		writeErr(w, 400, "请求格式错误")
+		writeReadErr(w, err)
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
@@ -148,12 +147,12 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 	}
 	t, plaintext, err := auth.CreateAPIToken(s.Store.DB, req.Name, scopes, req.ExpiresAt)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 	uid, _ := auth.UserID(r.Context())
 	audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionTokenCreate, nil,
-		`{"name":"`+req.Name+`","scopes":`+joinScopes(scopes)+`}`, clientIP(r))
+		audit.Detail(map[string]any{"name": req.Name, "scopes": scopes}), clientIP(r))
 	t.Token = plaintext
 	writeJSON(w, 201, t)
 }
@@ -172,7 +171,7 @@ func joinScopes(scopes []string) string {
 func (s *Server) revokeToken(w http.ResponseWriter, r *http.Request) {
 	id := parseInt64(chi.URLParam(r, "id"))
 	if err := auth.RevokeAPIToken(s.Store.DB, id); err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 	uid, _ := auth.UserID(r.Context())
@@ -190,7 +189,7 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {
 	limit, offset := intQuery(q.Get("limit"), 50), intQuery(q.Get("offset"), 0)
 	list, err := audit.List(s.Store.DB, q.Get("action"), limit, offset)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 	if list == nil {
@@ -199,7 +198,7 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {
 	if q.Get("with_total") == "1" {
 		total, err := audit.Count(s.Store.DB, q.Get("action"))
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeInternalErr(w, err)
 			return
 		}
 		writeJSON(w, 200, map[string]any{"total": total, "logs": list})

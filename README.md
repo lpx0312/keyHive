@@ -39,6 +39,7 @@ docker run -d \
 ```
 
 - 数据（库 + 密钥）全在 `/volume1/docker/keyhive`，备份拷贝该目录即可
+- 镜像以非 root（uid 1000）运行：bind mount 的宿主目录需保证 uid 1000 可写（`chown -R 1000:1000 /volume1/docker/keyhive`），否则首启写库失败；命名卷无需处理
 - 可选 `-e KEYHIVE_MASTER_KEY='任意字符串'`：固定主密钥；不填则自动生成并存入数据卷
 - 群晖不开 SSH 时：先在任意有 Docker 的机器 `docker pull` 后 `docker save` 导出 tar，到群晖 Container Manager「映像」导入，再按上述参数运行（端口 `8020`、卷 `/volume1/docker/keyhive` → `/app/data`、时区 `Asia/Shanghai`）
 
@@ -60,7 +61,7 @@ docker stop keyhive && docker rm keyhive
 # 重新执行上面的 docker run 命令；数据卷不删则数据无损
 ```
 
-需要回滚时把 `latest` 换成固定版本号（如 `1.2.5`）。
+需要回滚时把 `latest` 换成固定版本号（如 `1.2.5`）。版本变更明细见仓库 [CHANGELOG.md](./CHANGELOG.md)。
 
 ### 裸机
 
@@ -127,9 +128,9 @@ keyhive totp 5                    # 生成两步验证 6 位动态码（30 秒�
 keyhive add --file entry.json     # 录入条目（admin 登录；密码用 --pass 或 KEYHIVE_ADMIN_PASS 环境变量传入，避免进 shell 历史）
 keyhive edit 3 password=NewP@ss   # 更新条目字段（admin；未提及的敏感字段保留原值；密码轮换后更新库值）
 keyhive list --stale 90           # 只看超 90 天未更新的条目（密码轮换提醒）
-keyhive import --file bitwarden.csv --format bitwarden [--dry-run]  # 从 Bitwarden/Chrome CSV 批量导入
+keyhive import --file bitwarden.csv --format bitwarden [--dry-run]  # 从 Bitwarden/Chrome CSV 批量导入（Bitwarden 笔记按敏感字段+AI 不可见导入；CSV 引号畸形会报错拒绝）
 keyhive import --file keyhive-export.json --format keyhive [--dry-run]  # 用明文导出 JSON 恢复备份（遮蔽版会被拒绝）
-keyhive export [--masked]         # 全库导出（admin；--masked 输出遮蔽版；明文导出记审计）
+keyhive export [--masked]         # 全库导出（admin；--masked 走服务端遮蔽；明文导出记审计）
 keyhive rotate-key                # 主密钥轮换：重加密全部条目+更新 key_check（admin，记审计）
 ```
 
@@ -168,6 +169,8 @@ CI 示例（GitHub Actions 中取密码做 docker login）：
 | `KEYHIVE_DATA` | `./data` | 数据目录（库 + 密钥） |
 | `KEYHIVE_MASTER_KEY` | 自动生成 | 主密钥（任意字符串，SHA-256 派生）；与数据目录分离存放更安全 |
 | `KEYHIVE_KEYFILE` | - | 主密钥文件路径（优先于数据目录内 master.key） |
+
+主密钥文件内容为空（0 字节或纯空白）时服务拒绝启动（防止密钥静默退化为公开常量），按日志提示删除该文件后重启会自动生成新密钥。
 
 ## 开发
 

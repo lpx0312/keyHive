@@ -26,7 +26,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.Store.DB.Query(
 		`SELECT id, username, is_admin, disabled, created_at FROM users ORDER BY id`)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 	defer rows.Close()
@@ -35,7 +35,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 		var u model.User
 		var isAdmin, disabled int
 		if err := rows.Scan(&u.ID, &u.Username, &isAdmin, &disabled, &u.CreatedAt); err != nil {
-			writeErr(w, 500, err.Error())
+			writeInternalErr(w, err)
 			return
 		}
 		u.IsAdmin, u.Disabled = isAdmin == 1, disabled == 1
@@ -51,7 +51,7 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		IsAdmin  bool   `json:"is_admin"`
 	}
 	if err := readBody(r, &req); err != nil {
-		writeErr(w, 400, "请求格式错误")
+		writeReadErr(w, err)
 		return
 	}
 	req.Username = strings.TrimSpace(req.Username)
@@ -83,13 +83,13 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		`INSERT INTO users (username, password_hash, is_admin, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
 		req.Username, hash, isAdmin, now, now)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 	id, _ := res.LastInsertId()
 	uid, uname := s.actor(r)
 	audit.Log(s.Store.DB, "user", uid, uname, model.ActionUserCreate, nil,
-		`{"username":"`+req.Username+`","is_admin":`+boolJSON(req.IsAdmin)+`}`, clientIP(r))
+		audit.Detail(map[string]any{"username": req.Username, "is_admin": req.IsAdmin}), clientIP(r))
 	writeJSON(w, 201, model.User{ID: id, Username: req.Username, IsAdmin: req.IsAdmin, CreatedAt: now})
 }
 
@@ -112,7 +112,7 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 		IsAdmin  *bool   `json:"is_admin"`
 	}
 	if err := readBody(r, &req); err != nil {
-		writeErr(w, 400, "请求格式错误")
+		writeReadErr(w, err)
 		return
 	}
 
@@ -165,7 +165,7 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 	sets = append(sets, "updated_at = ?")
 	args = append(args, dbNow(), id)
 	if _, err := s.Store.DB.Exec(`UPDATE users SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...); err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 
@@ -176,8 +176,8 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 
 	uid, uname := s.actor(r)
 	audit.Log(s.Store.DB, "user", uid, uname, model.ActionUserUpdate, &id,
-		`{"username":"`+target.Username+`","reset_password":`+boolJSON(req.Password != nil)+
-			`,"disabled":`+boolPtrJSON(req.Disabled)+`,"is_admin":`+boolPtrJSON(req.IsAdmin)+`}`, clientIP(r))
+		audit.Detail(map[string]any{"username": target.Username, "reset_password": req.Password != nil,
+			"disabled": req.Disabled, "is_admin": req.IsAdmin}), clientIP(r))
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -205,13 +205,13 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if _, err := s.Store.DB.Exec(`DELETE FROM users WHERE id = ?`, id); err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 	auth.DeleteUserSessions(s.Store.DB, id)
 	actorID, uname := s.actor(r)
 	audit.Log(s.Store.DB, "user", actorID, uname, model.ActionUserDelete, &id,
-		`{"username":"`+target.Username+`"}`, clientIP(r))
+		audit.Detail(map[string]any{"username": target.Username}), clientIP(r))
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

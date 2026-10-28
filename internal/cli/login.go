@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"golang.org/x/term"
@@ -111,6 +112,12 @@ func cmdLogin(args []string) int {
 	}
 	if err := os.WriteFile(path, append(out, '\n'), 0o600); err != nil {
 		fmt.Fprintln(os.Stderr, "错误: 写入配置失败:", err)
+		return 1
+	}
+	// os.WriteFile 的 perm 仅对新建文件生效，合并更新已有文件时不会收紧权限，
+	// 写后显式 chmod 0600；Windows 下 chmod 仅作用于只读位，失败忽略即可
+	if err := os.Chmod(path, 0o600); err != nil && runtime.GOOS != "windows" {
+		fmt.Fprintln(os.Stderr, "错误: 收紧配置文件权限失败:", err)
 		return 1
 	}
 	fmt.Printf("✅ 配置已%s: %s\n", pick(existed, "更新", "创建"), path)

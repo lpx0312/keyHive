@@ -74,4 +74,27 @@ describe('api()', () => {
     expect(calls[0].init.method).toBe('POST')
     expect(calls[0].init.body).toBe('{"title":"T"}')
   })
+
+  // ---- 错误路径补充：网络层失败 / 401 跳转目标 ----
+
+  it('网络错误（fetch reject）原样向上传播，不包装为"请求失败"', async () => {
+    // 真实行为：api() 无兜底 catch，fetch 的 reject 直接透传给调用方
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))))
+    await expect(api('/entries')).rejects.toThrow(TypeError)
+    await expect(api('/entries')).rejects.toThrow('Failed to fetch')
+  })
+
+  it('401 时跳转目标为 /login（替换 location 验证赋值确实发生）', async () => {
+    // jsdom 的 location.href 为不可配置 own property，无法劫持 setter；
+    // 以 stub 对象整体替换 globalThis.location，验证赋值目标
+    const fakeLoc = { pathname: '/entries', href: '' }
+    vi.stubGlobal('location', fakeLoc)
+    try {
+      mockFetch(401, { error: '未登录' })
+      await expect(api('/entries')).rejects.toThrow('未登录')
+      expect(fakeLoc.href).toBe('/login')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })

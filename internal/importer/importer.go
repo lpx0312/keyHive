@@ -54,10 +54,12 @@ func Parse(format string, data []byte) ([]Entry, error) {
 }
 
 // parseCSV 通用：表头列名 → 行 map → 过滤映射
+// LazyQuotes 保持 false：密码管理器导入是"迁移后即删源"的高信任操作，
+// 未闭合引号等畸形 CSV 必须报错拒绝，而不是静默吞行/产生脏数据
 func parseCSV(data []byte, mapRow func(map[string]string) (Entry, bool)) ([]Entry, error) {
 	r := csv.NewReader(bytes.NewReader(data))
 	r.FieldsPerRecord = -1 // 各行列数可能不齐
-	r.LazyQuotes = true
+	r.LazyQuotes = false
 	header, err := r.Read()
 	if err != nil {
 		return nil, fmt.Errorf("读取表头失败: %w", err)
@@ -107,12 +109,17 @@ func ToEntryJSON(e Entry, source string) map[string]any {
 		secret := totp.ParseOTAuth(e.TOTP) // Bitwarden 常见 otpauth:// URI，提取纯密钥
 		add("totp_secret", "两步验证 TOTP 密钥（keyhive totp 命令可直接生成动态码）", secret, true)
 	}
-	add("notes", "备注", e.Notes, false, true)
+	// notes 是自由文本，用户习惯存放恢复码/密保答案等高敏内容：
+	// 按敏感字段导入（is_secret=true，走遮蔽与 reveal 审计管控）
+	add("notes", "备注（常含恢复码等敏感信息）", e.Notes, true, true)
+	// 含 notes 的条目不默认对 AI 可见，避免明文直达 AI 上下文；
+	// 用户确认安全后可在 Web UI 手动打开 ai_visible
+	aiVisible := e.Notes == ""
 	return map[string]any{
 		"title":       e.Title,
 		"category":    "web_account",
 		"description": fmt.Sprintf("从 %s CSV 导入 @ %s", source, time.Now().Format("2006-01-02")),
-		"ai_visible":  true,
+		"ai_visible":  aiVisible,
 		"fields":      fields,
 	}
 }

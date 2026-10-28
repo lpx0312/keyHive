@@ -127,13 +127,16 @@ func requireRead() (*cli.Config, error) {
 	return cfg, nil
 }
 
+// callAndWrap 统一调 keyHive 服务并把响应包成 MCP 工具结果。
+// 错误分支必须用 NewToolResultError 标记 isError=true：MCP 客户端
+// （ZCode/Claude 等）靠它区分工具成败，纯文本会被当作正常返回值进模型上下文
 func callAndWrap(call func() ([]byte, int, error)) (*mcp.CallToolResult, error) {
 	data, code, err := call()
 	if err != nil {
-		return text("请求失败: " + err.Error()), nil
+		return mcp.NewToolResultError("请求失败: " + err.Error()), nil
 	}
 	if code != 200 {
-		return text(fmt.Sprintf("HTTP %d: %s", code, string(data))), nil
+		return mcp.NewToolResultError(fmt.Sprintf("HTTP %d: %s", code, string(data))), nil
 	}
 	return text(string(data)), nil
 }

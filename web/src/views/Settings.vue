@@ -153,12 +153,17 @@ function onFabVisibleChange(v: any) {
 async function change() {
   if (newPw.value.length < 8) return ElMessage.warning('新密码至少 8 位')
   if (newPw.value !== newPw2.value) return ElMessage.warning('两次输入不一致')
-  await api('/password', {
-    method: 'POST',
-    body: JSON.stringify({ old_password: oldPw.value, new_password: newPw.value }),
-  })
-  ElMessage.success('密码已修改，请重新登录')
-  setTimeout(() => (location.href = '/login'), 1000)
+  try {
+    await api('/password', {
+      method: 'POST',
+      body: JSON.stringify({ old_password: oldPw.value, new_password: newPw.value }),
+    })
+    ElMessage.success('密码已修改，请重新登录')
+    setTimeout(() => (location.href = '/login'), 1000)
+  } catch (e: any) {
+    // 旧密码错误等失败路径：明确反馈错误信息，避免点击后毫无反应（审查 P2）
+    ElMessage.error(e.message)
+  }
 }
 
 // ---- AI 录入助手配置 ----

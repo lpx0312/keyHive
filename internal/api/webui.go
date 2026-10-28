@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -58,7 +57,7 @@ func (s *Server) genTOTP(w http.ResponseWriter, r *http.Request) {
 	uid, uname := s.actor(r)
 	eid := e.ID
 	audit.Log(s.Store.DB, "user", uid, uname, model.ActionTOTPGen, &eid,
-		`{"title":"`+e.Title+`","field":"`+f.Key+`"}`, clientIP(r))
+		audit.Detail(map[string]any{"title": e.Title, "field": f.Key}), clientIP(r))
 	writeJSON(w, 200, map[string]any{"code": code, "remaining": remain, "period": 30})
 }
 
@@ -70,7 +69,11 @@ func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 		CSV    string `json:"csv"`
 		DryRun bool   `json:"dry_run"`
 	}
-	if err := readBody(r, &req); err != nil || req.CSV == "" {
+	if err := readBody(r, &req); err != nil {
+		writeReadErr(w, err)
+		return
+	}
+	if req.CSV == "" {
 		writeErr(w, 400, "请求体应为 {format, csv, dry_run}")
 		return
 	}
@@ -112,7 +115,7 @@ func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 		ok++
 	}
 	audit.Log(s.Store.DB, "user", uid, uname, model.ActionImport, nil,
-		fmt.Sprintf(`{"source":"%s","ok":%d,"fail":%d}`, source, ok, len(fail)), clientIP(r))
+		audit.Detail(map[string]any{"source": source, "ok": ok, "fail": len(fail)}), clientIP(r))
 	writeJSON(w, 200, map[string]any{"ok": ok, "fail": fail})
 }
 
@@ -147,7 +150,7 @@ func (s *Server) importKeyhive(w http.ResponseWriter, r *http.Request, content s
 		ok++
 	}
 	audit.Log(s.Store.DB, "user", uid, uname, model.ActionImport, nil,
-		fmt.Sprintf(`{"source":"keyHive","ok":%d,"fail":%d}`, ok, len(fail)), clientIP(r))
+		audit.Detail(map[string]any{"source": "keyHive", "ok": ok, "fail": len(fail)}), clientIP(r))
 	writeJSON(w, 200, map[string]any{"ok": ok, "fail": fail})
 }
 
@@ -170,13 +173,17 @@ func (s *Server) putStaleDays(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		StaleDays int `json:"stale_days"`
 	}
-	if err := readBody(r, &req); err != nil || req.StaleDays < 1 || req.StaleDays > 3650 {
+	if err := readBody(r, &req); err != nil {
+		writeReadErr(w, err)
+		return
+	}
+	if req.StaleDays < 1 || req.StaleDays > 3650 {
 		writeErr(w, 400, "stale_days 应为 1-3650 的天数")
 		return
 	}
 	if _, err := s.Store.DB.Exec(`INSERT INTO settings (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, settingStaleDays, strconv.Itoa(req.StaleDays)); err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 	writeJSON(w, 200, map[string]int{"stale_days": req.StaleDays})

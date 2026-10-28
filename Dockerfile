@@ -25,7 +25,9 @@ RUN go build -ldflags="-s -w -X github.com/lpx0312/keyHive/internal/version.Vers
 
 # ---- 运行镜像 ----
 FROM alpine:3.21
-RUN adduser -D -H -u 1000 keyhive && apk add --no-cache ca-certificates tzdata
+# 构建期预创建数据目录并授权（对齐 adduser -u 1000）：否则非 root 首次以匿名卷/命名卷启动时写库 EACCES
+RUN adduser -D -H -u 1000 keyhive && apk add --no-cache ca-certificates tzdata \
+    && mkdir -p /app/data && chown 1000:1000 /app/data
 USER keyhive
 WORKDIR /app
 COPY --from=build /out/keyhive /app/keyhive

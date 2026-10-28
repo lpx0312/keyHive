@@ -28,7 +28,7 @@ type StreamEvent struct {
 // emit 阻塞即背压（SSE 写不出去时暂停读取）。最终结果同时整体返回。
 func ChatStream(ctx context.Context, cfg Config, systemPrompt string, history []ChatMessage, userMessage string, cb ToolCallbacks, emit func(StreamEvent) error) (*Response, error) {
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = DefaultBaseURL
+		cfg.BaseURL = cfg.defaultBaseURL() // 默认端点按协议分派，避免 anthropic 走 OpenAI 端点
 	}
 	if cfg.Model == "" {
 		cfg.Model = DefaultModel

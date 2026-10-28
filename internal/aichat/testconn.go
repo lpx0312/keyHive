@@ -10,7 +10,7 @@ import (
 // 实测往返耗时），返回 ok/model/protocol/latency_ms/reply
 func TestConnection(ctx context.Context, cfg Config) map[string]any {
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = DefaultBaseURL
+		cfg.BaseURL = cfg.defaultBaseURL() // 默认端点按协议分派，避免 anthropic 走 OpenAI 端点
 	}
 	if cfg.Model == "" {
 		cfg.Model = DefaultModel

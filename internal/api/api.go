@@ -2,7 +2,8 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -19,6 +20,27 @@ type Server struct {
 	Store *store.Store
 }
 
+// maxBodyBytes 全站请求体大小上限（含未认证端点，防未登录内存耗尽）
+const maxBodyBytes = 10 << 20 // 10MB
+
+// LimitBody 统一给请求体套 MaxBytesReader：Content-Length 已超限直接 413，
+// 运行中（如 chunked）读取超限由 readBody 识别后同样映射 413。
+// 导出供 main 在顶层 router 挂载，使 /api/v1/ai（Bearer token AI API）子树
+// 也纳入限制；人用 Routes() 内的挂载保留（Routes 会被单独挂载使用），
+// 两处同限值 10MB 双重包裹行为等价、无害。
+func LimitBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength > maxBodyBytes {
+			writeErr(w, http.StatusRequestEntityTooLarge, "请求体超过 10MB 上限")
+			return
+		}
+		if r.Body != nil && r.Body != http.NoBody {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
@@ -29,9 +51,33 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// writeInternalErr 5xx 内部错误统一出口：完整错误只进服务端日志，客户端只回通用文案
+func writeInternalErr(w http.ResponseWriter, err error) {
+	log.Printf("[api] internal error: %v", err)
+	writeErr(w, 500, "服务器内部错误")
+}
+
+// errBodyTooLarge 请求体超限哨兵（readBody 识别 MaxBytesError 后返回）
+var errBodyTooLarge = errors.New("http: request body too large")
+
+// writeReadErr 请求体读取/解码失败统一出口：超限 413，其余按格式错误 400
+func writeReadErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, errBodyTooLarge) {
+		writeErr(w, http.StatusRequestEntityTooLarge, "请求体超过 10MB 上限")
+		return
+	}
+	writeErr(w, 400, "请求格式错误")
+}
+
 func readBody(r *http.Request, v any) error {
 	defer r.Body.Close()
-	return json.NewDecoder(r.Body).Decode(v)
+	err := json.NewDecoder(r.Body).Decode(v)
+	// MaxBytesReader 超限读取返回 *http.MaxBytesError，与普通解码错误区分开
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		return errBodyTooLarge
+	}
+	return err
 }
 
 func clientIP(r *http.Request) string {
@@ -54,6 +100,8 @@ func (s *Server) usernameByID(id int64) string {
 
 // Routes 挂载全部人用路由
 func (s *Server) Routes(r chi.Router) {
+	// 全站请求体大小限制（含未认证端点）
+	r.Use(LimitBody)
 	r.Post("/auth/login", s.login)
 	r.Post("/auth/logout", s.logout)
 	r.Get("/version", s.versionInfo)
@@ -80,10 +128,9 @@ func (s *Server) Routes(r chi.Router) {
 		pr.Put("/templates/{id}", s.updateTemplate)
 		pr.Delete("/templates/{id}", s.deleteTemplate)
 
-		// AI 录入助手：聊天对所有登录用户开放，LLM 配置仅管理员
+		// AI 录入助手：聊天对所有登录用户开放；LLM 配置读取登录即可，
+		// 但测试连接 / 拉模型会解密已保存 Key 并向用户自填地址发起外联请求，仅管理员可用
 		pr.Get("/ai-config", s.handleAIConfig)
-		pr.Post("/ai-config/test", s.handleAIConfigTest)
-		pr.Post("/ai-config/models", s.handleAIListModels)
 		pr.Post("/ai-chat", s.handleAIChat)
 		pr.Post("/ai-chat/stream", s.handleAIChatStream)
 	})
@@ -108,19 +155,28 @@ func (s *Server) Routes(r chi.Router) {
 		ar.Post("/import", s.importCSV)
 		ar.Put("/settings/stale-days", s.putStaleDays)
 		ar.Put("/ai-config", s.handleAIConfig)
+		ar.Post("/ai-config/test", s.handleAIConfigTest)
+		ar.Post("/ai-config/models", s.handleAIListModels)
 	})
 }
 
-// exportEntries 全库明文导出（admin，每次记审计）
+// exportEntries 全库导出（admin，每次记审计）：默认明文；
+// ?masked=1（或 masked=true）时敏感字段值遮蔽为 ***，其余结构不变
 func (s *Server) exportEntries(w http.ResponseWriter, r *http.Request) {
 	list, err := s.Store.ListEntries("", "")
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
+	}
+	masked := r.URL.Query().Get("masked") == "1" || r.URL.Query().Get("masked") == "true"
+	if masked {
+		for i := range list {
+			list[i].MaskSecrets()
+		}
 	}
 	uid, uname := s.actor(r)
 	audit.Log(s.Store.DB, "user", uid, uname, model.ActionExport, nil,
-		fmt.Sprintf(`{"count":%d}`, len(list)), clientIP(r))
+		audit.Detail(map[string]any{"count": len(list), "masked": masked}), clientIP(r))
 	writeJSON(w, 200, list)
 }
 
@@ -132,7 +188,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := readBody(r, &req); err != nil {
-		writeErr(w, 400, "请求格式错误")
+		writeReadErr(w, err)
 		return
 	}
 	var id int64
@@ -202,7 +258,7 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		NewPassword string `json:"new_password"`
 	}
 	if err := readBody(r, &req); err != nil {
-		writeErr(w, 400, "请求格式错误")
+		writeReadErr(w, err)
 		return
 	}
 	uid, _ := auth.UserID(r.Context())
@@ -239,7 +295,7 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listEntries(w http.ResponseWriter, r *http.Request) {
 	list, err := s.Store.ListEntries(r.URL.Query().Get("q"), r.URL.Query().Get("category"))
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 	for i := range list {
@@ -251,7 +307,7 @@ func (s *Server) listEntries(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createEntry(w http.ResponseWriter, r *http.Request) {
 	var e model.Entry
 	if err := readBody(r, &e); err != nil {
-		writeErr(w, 400, "请求格式错误")
+		writeReadErr(w, err)
 		return
 	}
 	if err := s.Store.CreateEntry(&e); err != nil {
@@ -261,7 +317,7 @@ func (s *Server) createEntry(w http.ResponseWriter, r *http.Request) {
 	uid, _ := auth.UserID(r.Context())
 	id := e.ID
 	audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionEntryCreate, &id,
-		`{"title":"`+e.Title+`"}`, clientIP(r))
+		audit.Detail(map[string]any{"title": e.Title}), clientIP(r))
 	e.MaskSecrets()
 	writeJSON(w, 201, e)
 }
@@ -277,7 +333,7 @@ func (s *Server) getEntry(w http.ResponseWriter, r *http.Request) {
 	eid := e.ID
 	if r.URL.Query().Get("reveal") == "true" {
 		audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionEntryReveal, &eid,
-			`{"title":"`+e.Title+`"}`, clientIP(r))
+			audit.Detail(map[string]any{"title": e.Title}), clientIP(r))
 		writeJSON(w, 200, e) // 明文
 		return
 	}
@@ -289,7 +345,7 @@ func (s *Server) updateEntry(w http.ResponseWriter, r *http.Request) {
 	id := parseInt64(chi.URLParam(r, "id"))
 	var e model.Entry
 	if err := readBody(r, &e); err != nil {
-		writeErr(w, 400, "请求格式错误")
+		writeReadErr(w, err)
 		return
 	}
 	if err := s.Store.UpdateEntry(id, &e); err != nil {
@@ -299,7 +355,7 @@ func (s *Server) updateEntry(w http.ResponseWriter, r *http.Request) {
 	uid, _ := auth.UserID(r.Context())
 	eid := id
 	audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionEntryUpdate, &eid,
-		`{"title":"`+e.Title+`"}`, clientIP(r))
+		audit.Detail(map[string]any{"title": e.Title}), clientIP(r))
 	e.MaskSecrets()
 	writeJSON(w, 200, e)
 }
@@ -312,13 +368,13 @@ func (s *Server) deleteEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.Store.DeleteEntry(id); err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 	uid, _ := auth.UserID(r.Context())
 	eid := id
 	audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionEntryDelete, &eid,
-		`{"title":"`+e.Title+`"}`, clientIP(r))
+		audit.Detail(map[string]any{"title": e.Title}), clientIP(r))
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -349,14 +405,14 @@ func (s *Server) saveAsTemplate(w http.ResponseWriter, r *http.Request) {
 	uid, _ := auth.UserID(r.Context())
 	eid := e.ID
 	audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionTemplateSave, &eid,
-		`{"template":"`+t.Name+`"}`, clientIP(r))
+		audit.Detail(map[string]any{"template": t.Name}), clientIP(r))
 	writeJSON(w, 201, t)
 }
 
 func (s *Server) categories(w http.ResponseWriter, r *http.Request) {
 	list, err := s.Store.Categories()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 	if list == nil {

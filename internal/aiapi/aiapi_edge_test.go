@@ -153,6 +153,9 @@ func TestClosedDBHandlers(t *testing.T) {
 	if w.code != 500 {
 		t.Fatalf("关库列表应 500，实际 %d", w.code)
 	}
+	if !strings.Contains(w.buf.String(), "服务器内部错误") {
+		t.Fatalf("500 应回通用文案而非内部错误原文，实际 %q", w.buf.String())
+	}
 	w2 := &respRecorder{header: http.Header{}}
 	r2, _ := http.NewRequest("GET", "/entries/1", nil)
 	s.GetEntry(w2, r2)
@@ -164,6 +167,9 @@ func TestClosedDBHandlers(t *testing.T) {
 	s.Search(w3, r3)
 	if w3.code != 500 {
 		t.Fatalf("关库搜索应 500，实际 %d", w3.code)
+	}
+	if !strings.Contains(w3.buf.String(), "服务器内部错误") {
+		t.Fatalf("500 应回通用文案而非内部错误原文，实际 %q", w3.buf.String())
 	}
 	w4 := &respRecorder{header: http.Header{}}
 	r4, _ := http.NewRequest("POST", "/entries/1/reveal", strings.NewReader(`{"field":"f"}`))

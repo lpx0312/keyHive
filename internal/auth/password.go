@@ -56,6 +56,11 @@ func VerifyPassword(password, encoded string) bool {
 	if err != nil {
 		return false
 	}
+	// 畸形参数前置校验：t/p/m 为 0 时 argon2.IDKey 直接 panic，
+	// 盐或密文长度为 0 会得到恒等比较（空密文恒"通过"），一律判验证失败
+	if t == 0 || p == 0 || m == 0 || len(salt) == 0 || len(want) == 0 {
+		return false
+	}
 	got := argon2.IDKey([]byte(password), salt, t, m, p, uint32(len(want)))
 	return subtle.ConstantTimeCompare(got, want) == 1
 }

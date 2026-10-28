@@ -39,44 +39,69 @@ func adminClient(cfg *Config, user, pass string) (*http.Client, error) {
 	return client, nil
 }
 
-// adminCall admin 会话发起任意请求
-func adminCall(cfg *Config, user, pass, method, path string, body []byte) ([]byte, int, error) {
-	base := cfg.BaseURL
-	if base == "" {
-		base = defaultBaseURL
-	}
-	client, err := adminClient(cfg, user, pass)
-	if err != nil {
-		return nil, 0, err
-	}
+// adminSession 已登录的 admin 会话：复用同一 client/cookie 批量发请求，
+// 避免"每条导入 = 一次 argon2id 登录验证 + 一个服务端会话 + 一条登录审计"
+type adminSession struct {
+	client *http.Client
+	base   string
+}
+
+// call 复用会话发起请求（不再重新登录）
+func (s *adminSession) call(method, path string, body []byte) ([]byte, int, error) {
 	var rd io.Reader
 	if body != nil {
 		rd = bytes.NewReader(body)
 	}
-	req, err := http.NewRequest(method, base+path, rd)
+	req, err := http.NewRequest(method, s.base+path, rd)
 	if err != nil {
 		return nil, 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
+	resp, err := s.client.Do(req)
 	if err != nil {
-		return nil, 0, &ErrServiceDown{Base: base}
+		return nil, 0, &ErrServiceDown{Base: s.base}
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	return data, resp.StatusCode, nil
 }
 
-// adminFlags 解析 admin 命令的公共参数（--user/--pass，KEYHIVE_ADMIN_PASS 兜底）
-func adminFlags(args []string) (*flag.FlagSet, *string, *string) {
+// loginAdmin 登录一次并返回可复用会话（批量操作入口）
+func loginAdmin(cfg *Config, user, pass string) (*adminSession, error) {
+	client, err := adminClient(cfg, user, pass)
+	if err != nil {
+		return nil, err
+	}
+	base := cfg.BaseURL
+	if base == "" {
+		base = defaultBaseURL
+	}
+	return &adminSession{client: client, base: base}, nil
+}
+
+// adminCall admin 登录并发起单个请求（单条操作用；批量请走 loginAdmin 复用会话）
+func adminCall(cfg *Config, user, pass, method, path string, body []byte) ([]byte, int, error) {
+	sess, err := loginAdmin(cfg, user, pass)
+	if err != nil {
+		return nil, 0, err
+	}
+	return sess.call(method, path, body)
+}
+
+// adminFlags 解析 admin 命令的公共参数（--user/--pass，KEYHIVE_ADMIN_PASS 兜底）。
+// 解析失败返回错误：调用方必须打印用法并返回退出码 2，禁止带默认参数继续执行
+// （如 rotate-key 打错 flag 仍触发真正的主密钥轮换）
+func adminFlags(args []string) (*flag.FlagSet, *string, *string, error) {
 	fs := flag.NewFlagSet("", flag.ContinueOnError)
 	user := fs.String("user", "admin", "管理员用户名")
 	pass := fs.String("pass", "", "管理员密码（推荐环境变量 KEYHIVE_ADMIN_PASS）")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return fs, user, pass, err
+	}
 	if *pass == "" {
 		*pass = strings.TrimSpace(os.Getenv("KEYHIVE_ADMIN_PASS"))
 	}
-	return fs, user, pass
+	return fs, user, pass, nil
 }
 
 // ---- export ----
@@ -86,7 +111,9 @@ func cmdExport(cfg *Config, args []string) int {
 	user := fs.String("user", "admin", "管理员用户名")
 	pass := fs.String("pass", "", "管理员密码（推荐环境变量 KEYHIVE_ADMIN_PASS）")
 	masked := fs.Bool("masked", false, "敏感值替换为 *** 后输出（用于分享结构）")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 	if *pass == "" {
 		*pass = strings.TrimSpace(os.Getenv("KEYHIVE_ADMIN_PASS"))
 	}
@@ -94,7 +121,13 @@ func cmdExport(cfg *Config, args []string) int {
 		fmt.Fprintln(os.Stderr, "错误: 未提供管理员密码（--pass 或环境变量 KEYHIVE_ADMIN_PASS）")
 		return 1
 	}
-	data, code, err := adminCall(cfg, *user, *pass, http.MethodGet, "/api/v1/export", nil)
+	// masked=1 请求服务端直接返回遮蔽版（结构不变）；服务端未支持该参数时会忽略之，
+	// 下方的客户端遮蔽逻辑兜底（服务端已遮蔽的 *** 再遮蔽结果不变）
+	exportPath := "/api/v1/export"
+	if *masked {
+		exportPath += "?masked=1"
+	}
+	data, code, err := adminCall(cfg, *user, *pass, http.MethodGet, exportPath, nil)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "错误:", err)
 		return 1
@@ -139,7 +172,9 @@ func cmdImport(cfg *Config, args []string) int {
 	dryRun := fs.Bool("dry-run", false, "只预览不写入")
 	user := fs.String("user", "admin", "管理员用户名")
 	pass := fs.String("pass", "", "管理员密码（推荐环境变量 KEYHIVE_ADMIN_PASS）")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 	if *pass == "" {
 		*pass = strings.TrimSpace(os.Getenv("KEYHIVE_ADMIN_PASS"))
 	}
@@ -180,10 +215,17 @@ func cmdImport(cfg *Config, args []string) int {
 		fmt.Fprintln(os.Stderr, "错误: 未提供管理员密码（--pass 或环境变量 KEYHIVE_ADMIN_PASS）")
 		return 1
 	}
+	// 登录一次，复用同一会话完成全部导入：N 条导入 = 1 次 argon2id 验证 + 1 个会话
+	//（此前逐条 AddEntry 各自重新登录，服务端开销与审计日志随条数翻倍）
+	sess, err := loginAdmin(cfg, *user, *pass)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "错误:", err)
+		return 1
+	}
 	ok, fail := 0, 0
 	for _, e := range entries {
 		body, _ := json.Marshal(importer.ToEntryJSON(e, sourceLabel(*format)))
-		data, code, err := AddEntry(cfg, *user, *pass, body)
+		data, code, err := sess.call(http.MethodPost, "/api/v1/entries", body)
 		if err != nil || code != 201 {
 			fail++
 			fmt.Fprintf(os.Stderr, "  ❌ %s: %s\n", e.Title, errOrBody(err, data))
@@ -228,10 +270,16 @@ func importKeyhive(cfg *Config, raw []byte, user, pass string, dryRun bool) int 
 		fmt.Fprintln(os.Stderr, "错误: 未提供管理员密码（--pass 或环境变量 KEYHIVE_ADMIN_PASS）")
 		return 1
 	}
+	// 同 cmdImport：登录一次复用会话完成全部导入
+	sess, err := loginAdmin(cfg, user, pass)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "错误:", err)
+		return 1
+	}
 	ok, fail := 0, 0
 	for i := range entries {
 		body, _ := json.Marshal(entries[i])
-		data, code, err := AddEntry(cfg, user, pass, body)
+		data, code, err := sess.call(http.MethodPost, "/api/v1/entries", body)
 		if err != nil || code != 201 {
 			fail++
 			fmt.Fprintf(os.Stderr, "  ❌ %s: %s\n", entries[i].Title, errOrBody(err, data))
@@ -256,7 +304,12 @@ func errOrBody(err error, data []byte) string {
 // ---- rotate-key ----
 
 func cmdRotateKey(cfg *Config, args []string) int {
-	_, user, pass := adminFlags(args)
+	_, user, pass, err := adminFlags(args)
+	if err != nil {
+		// flag 包已打印具体解析错误；此处补用法并退出，不得带默认参数继续执行轮换
+		fmt.Fprintln(os.Stderr, "用法: keyhive rotate-key [--user <用户名>] [--pass <密码>]")
+		return 2
+	}
 	if *pass == "" {
 		fmt.Fprintln(os.Stderr, "错误: 未提供管理员密码（--pass 或环境变量 KEYHIVE_ADMIN_PASS）")
 		return 1
@@ -293,7 +346,12 @@ func cmdRotateKey(cfg *Config, args []string) int {
 // field 可为字段 key（仅限已存在字段）、title、category、description、ai_visible；
 // 未提及的敏感字段以遮蔽值回传，由服务端保留原值（无需全量明文）。
 func cmdEdit(cfg *Config, args []string) int {
-	fs, user, pass := adminFlags(args)
+	fs, user, pass, err := adminFlags(args)
+	if err != nil {
+		// flag 包已打印具体解析错误；此处补用法并退出
+		fmt.Fprintln(os.Stderr, "用法: keyhive edit <id> <field>=<value> [<field>=<value>...]\n示例: keyhive edit 3 password=NewP@ss")
+		return 2
+	}
 	rest := fs.Args()
 	if len(rest) < 2 {
 		fmt.Fprintln(os.Stderr, "用法: keyhive edit <id> <field>=<value> [<field>=<value>...]\n示例: keyhive edit 3 password=NewP@ss")

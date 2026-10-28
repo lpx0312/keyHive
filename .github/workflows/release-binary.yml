@@ -8,9 +8,7 @@ name: Build Binary & Release
 #
 # 触发：手动（输入版本号）或推送 v* tag 自动发版。
 # zone: cn 输入可切换 npm/Go 国内源（runner 在国外，保持 false）。
-
-permissions:
-  contents: write
+# 权限最小化：workflow 级不授权，仅真正发 Release 的 job 拿 contents:write，其余只读。
 
 on:
   workflow_dispatch:
@@ -34,6 +32,8 @@ jobs:
   # Job 1: 构建前端（一次），产物给各平台编译 job 复用
   # ============================================================
   build-frontend:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -69,6 +69,8 @@ jobs:
   # Job 2: 矩阵交叉编译（同一 runner，Go CGO_ENABLED=0）
   # ============================================================
   build-binary:
+    permissions:
+      contents: read
     needs: build-frontend
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -147,6 +149,8 @@ jobs:
   # Job 3: 发 Release（全平台产物挂同一 tag）
   # ============================================================
   release:
+    permissions:
+      contents: write # 创建 Release 并上传产物，唯一需要写权限的 job
     needs: build-binary
     runs-on: ubuntu-latest
     timeout-minutes: 10

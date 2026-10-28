@@ -26,7 +26,7 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request) {
 	keyText := base64.StdEncoding.EncodeToString(raw)
 	newCipher, err := crypto.New(crypto.DeriveKeyText(keyText))
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 
@@ -58,6 +58,6 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request) {
 
 	uid, uname := s.actor(r)
 	audit.Log(s.Store.DB, "user", uid, uname, model.ActionKeyRotate, nil,
-		fmt.Sprintf(`{"entries":%d}`, n), clientIP(r))
+		audit.Detail(map[string]any{"entries": n}), clientIP(r))
 	writeJSON(w, 200, resp)
 }

@@ -65,7 +65,9 @@ func runServe() {
 	}
 	defer db.Close()
 	log.Printf("keyHive 启动完成: http://localhost%s (数据目录 %s)", addr, dataDir)
-	if err := http.ListenAndServe(addr, srv.Handler); err != nil {
+	srv.Addr = addr
+	// 用 srv.ListenAndServe 让 buildServer 里设置的超时生效（http.ListenAndServe 会另建零配置 server）
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -115,6 +117,10 @@ func buildServer(dataDir string) (*http.Server, *sql.DB, error) {
 		})
 	})
 
+	// 请求体大小限制挂在顶层：/api/v1（人用）与 /api/v1/ai（Bearer token AI API）
+	// 子树统一覆盖（后者不经过 human.Routes，此前为限制盲区）；静态资源无请求体，无害
+	r.Use(api.LimitBody)
+
 	// 人用 API
 	r.Route("/api/v1", human.Routes)
 
@@ -139,7 +145,13 @@ func buildServer(dataDir string) (*http.Server, *sql.DB, error) {
 	dist, _ := fs.Sub(web.Dist, "dist")
 	r.Handle("/*", spaHandler(dist))
 
-	return &http.Server{Handler: r}, database, nil
+	// ReadHeaderTimeout 防慢速头部攻击，IdleTimeout 回收闲置连接；
+	// 不设 WriteTimeout：会把 SSE 长响应（AI 聊天流）在中途切断（前端审查已注明）
+	return &http.Server{
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}, database, nil
 }
 
 // ensureKeyCheck 首次写入校验值；已有则校验主密钥匹配

@@ -42,6 +42,16 @@ func (c Config) ProtocolOrDefault() string {
 const DefaultBaseURL = "https://open.bigmodel.cn/api/paas/v4"
 const DefaultModel = "glm-4.6"
 
+// defaultBaseURL 空 baseURL 时的默认端点，按协议分派：
+// openai → 智谱 OpenAI 兼容端点（DefaultBaseURL）；anthropic → Anthropic 官方端点。
+// 必须在协议分派前填充，否则 anthropic 的 x-api-key 会被发往 OpenAI 端点
+func (c Config) defaultBaseURL() string {
+	if c.ProtocolOrDefault() == ProtocolAnthropic {
+		return anthropicDefaultBaseURL
+	}
+	return DefaultBaseURL
+}
+
 // maxToolRounds 工具循环上限（search → 再决策），防止失控
 const maxToolRounds = 4
 
@@ -211,7 +221,7 @@ type llmResponseChoice struct {
 // Chat 带 agent 工具循环的对话：LLM 可先 search_entries 再产出（新建/更新）草稿
 func Chat(ctx context.Context, cfg Config, systemPrompt string, history []ChatMessage, userMessage string, cb ToolCallbacks) (*Response, error) {
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = DefaultBaseURL
+		cfg.BaseURL = cfg.defaultBaseURL() // 默认端点按协议分派，避免 anthropic 走 OpenAI 端点
 	}
 	if cfg.Model == "" {
 		cfg.Model = DefaultModel

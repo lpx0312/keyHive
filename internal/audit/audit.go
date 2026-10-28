@@ -2,9 +2,20 @@ package audit
 
 import (
 	"database/sql"
+	"encoding/json"
 	"github.com/lpx0312/keyHive/internal/model"
 	"time"
 )
+
+// Detail 用 json.Marshal 安全构造审计 detail：标题/字段名等含双引号、反斜杠时
+// 字符串拼接会产出非法 JSON，破坏审计的取证契约，调用方一律改用本函数
+func Detail(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
 
 func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }
 

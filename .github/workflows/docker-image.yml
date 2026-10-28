@@ -92,14 +92,20 @@ jobs:
           if [ "${ARCH_MODE}" = "all" ]; then SUFFIX="-amd64"; else SUFFIX=""; fi
 
           IFS=',' read -ra TAGS <<< "$IMAGE_TAGS"
+          # 从 image_tags 解析主版本号注入 VERSION（第一个非 latest 的 tag，去 v 前缀；全 latest 回退 dev），
+          # 传法对齐 docker-compose.yml 的 VERSION: ${KEYHIVE_VERSION:-dev}
+          VER="dev"
+          for t in "${TAGS[@]}"; do
+            if [ "$t" != "latest" ]; then VER="${t#v}"; break; fi
+          done
           BUILD_ARGS=()
           for t in "${TAGS[@]}"; do BUILD_ARGS+=(-t "${REPO}:${t}${SUFFIX}"); done
-          echo "=== docker build ${BUILD_ARGS[*]} ${CN_ARGS} ==="
-          docker build ${CN_ARGS} "${BUILD_ARGS[@]}" .
+          echo "=== docker build ${BUILD_ARGS[*]} ${CN_ARGS} VERSION=${VER} ==="
+          docker build ${CN_ARGS} --build-arg VERSION="${VER}" "${BUILD_ARGS[@]}" .
           for t in "${TAGS[@]}"; do
             docker push "${REPO}:${t}${SUFFIX}" || { echo "❌ 推送失败: ${REPO}:${t}${SUFFIX}"; exit 1; }
           done
-          echo "✅ 推送完成 (amd64): ${REPO}:{${IMAGE_TAGS}}${SUFFIX}"
+          echo "✅ 推送完成 (amd64): ${REPO}:{${IMAGE_TAGS}}${SUFFIX} (VERSION=${VER})"
         env:
           TARGET_REGISTRY: ${{ github.event.inputs.target_registry }}
           IMAGE_NAME: ${{ github.event.inputs.image_name || 'keyhive' }}
@@ -148,14 +154,20 @@ jobs:
           if [ "${ARCH_MODE}" = "all" ]; then SUFFIX="-arm64"; else SUFFIX=""; fi
 
           IFS=',' read -ra TAGS <<< "$IMAGE_TAGS"
+          # 从 image_tags 解析主版本号注入 VERSION（第一个非 latest 的 tag，去 v 前缀；全 latest 回退 dev），
+          # 传法对齐 docker-compose.yml 的 VERSION: ${KEYHIVE_VERSION:-dev}
+          VER="dev"
+          for t in "${TAGS[@]}"; do
+            if [ "$t" != "latest" ]; then VER="${t#v}"; break; fi
+          done
           BUILD_ARGS=()
           for t in "${TAGS[@]}"; do BUILD_ARGS+=(-t "${REPO}:${t}${SUFFIX}"); done
-          echo "=== docker build ${BUILD_ARGS[*]} ${CN_ARGS} ==="
-          docker build ${CN_ARGS} "${BUILD_ARGS[@]}" .
+          echo "=== docker build ${BUILD_ARGS[*]} ${CN_ARGS} VERSION=${VER} ==="
+          docker build ${CN_ARGS} --build-arg VERSION="${VER}" "${BUILD_ARGS[@]}" .
           for t in "${TAGS[@]}"; do
             docker push "${REPO}:${t}${SUFFIX}" || { echo "❌ 推送失败: ${REPO}:${t}${SUFFIX}"; exit 1; }
           done
-          echo "✅ 推送完成 (arm64): ${REPO}:{${IMAGE_TAGS}}${SUFFIX}"
+          echo "✅ 推送完成 (arm64): ${REPO}:{${IMAGE_TAGS}}${SUFFIX} (VERSION=${VER})"
         env:
           TARGET_REGISTRY: ${{ github.event.inputs.target_registry }}
           IMAGE_NAME: ${{ github.event.inputs.image_name || 'keyhive' }}

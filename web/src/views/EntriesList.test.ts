@@ -24,7 +24,7 @@ function mockDefaults() {
     if (String(path).startsWith('/entries')) return Promise.resolve(mockEntries)
     if (path === '/categories') return Promise.resolve(['docker_registry', 'web_account'])
     if (path === '/settings/stale-days') return Promise.resolve({ stale_days: 90 })
-    if (path === '/export') return Promise.resolve(mockEntries)
+    if (String(path).startsWith('/export')) return Promise.resolve(mockEntries) // 前缀匹配：兼容 ?masked=1
     return Promise.resolve({})
   })
 }
@@ -255,7 +255,7 @@ describe('EntriesList.vue', () => {
 
   it('导出失败：提示错误不崩溃（catch 分支）', async () => {
     apiMock.mockImplementation((path: string) => {
-      if (path === '/export') return Promise.reject(new Error('主密钥不匹配'))
+      if (String(path).startsWith('/export')) return Promise.reject(new Error('主密钥不匹配')) // 前缀匹配：兼容 ?masked=1
       if (String(path).startsWith('/entries')) return Promise.resolve(mockEntries)
       if (path === '/categories') return Promise.resolve([])
       return Promise.resolve({ stale_days: 90 })
@@ -365,5 +365,37 @@ describe('EntriesList.vue', () => {
     await flushPromises()
     await w.findAll('button').filter(b => b.text() === '新建条目')[0].trigger('click')
     expect(pushMock).toHaveBeenCalledWith('/entries/new')
+  })
+
+  // ---- 缺陷修复回归（审查 P2：EntriesList.vue 搜索无请求序号，乱序覆盖竞态；已加 loadSeq 守卫） ----
+  // 场景：输入 "a" 的慢响应晚于 "ab" 的快响应到达。正确行为：最终列表显示 "ab"（后发请求）的结果。
+  // 时序控制：受控 deferred promise（等效 vi.useFakeTimers + 延迟 resolve，且更精确）。
+  it('搜索竞态：后发快请求的结果不应被先发慢请求的旧结果覆盖', async () => {
+    const fastEntries = [{ ...mockEntries[1], id: 99, title: '第二次搜索结果' }]
+    let resolveSlow!: (v: any) => void
+    const slowPromise = new Promise<any>((r) => { resolveSlow = r })
+    apiMock.mockImplementation((path: string) => {
+      const p = String(path)
+      if (p.startsWith('/entries')) {
+        if (p.includes('q=ab')) return Promise.resolve(fastEntries) // 第二次搜索：立即返回
+        if (p.includes('q=a')) return slowPromise // 第一次搜索：挂起待手动放行
+        return Promise.resolve(mockEntries) // 初始全量加载
+      }
+      if (p === '/categories') return Promise.resolve([])
+      return Promise.resolve({ stale_days: 90 })
+    })
+    const w = mount(EntriesList, { global: { plugins: [ElementPlus] } })
+    await flushPromises() // 初始加载完成
+    const search = w.find('input[placeholder="搜索标题 / 说明 / 分类"]')
+    await search.setValue('a') // 第一次搜索：请求发出但被挂起
+    await search.setValue('ab') // 第二次搜索：响应先到并渲染
+    await flushPromises()
+    expect(w.text()).toContain('第二次搜索结果')
+    resolveSlow(mockEntries) // "a" 的慢响应此刻才返回（含 '生产ACR'）
+    await flushPromises()
+    // 正确行为：列表仍是第二次搜索的结果，不被旧响应覆盖
+    expect(w.text()).toContain('第二次搜索结果')
+    expect(w.text()).not.toContain('生产ACR')
+    w.unmount()
   })
 })

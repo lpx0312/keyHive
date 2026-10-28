@@ -2,6 +2,7 @@ package aiapi
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -26,6 +27,14 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// writeInternalErr 5xx 内部错误统一出口（对齐 api 包纪律）：
+// 完整错误只进服务端日志，客户端只回通用文案，不向 AI token 持有者回显
+// store/SQLite 内部错误原文
+func writeInternalErr(w http.ResponseWriter, err error) {
+	log.Printf("[aiapi] internal error: %v", err)
+	writeErr(w, 500, "服务器内部错误")
 }
 
 // 各端点由 main 按不同 scope 挂载：
@@ -54,7 +63,7 @@ func (s *Server) tokenInfo(r *http.Request) (int64, string) {
 func (s *Server) ListEntries(w http.ResponseWriter, r *http.Request) {
 	list, err := s.Store.ListEntries("", "")
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 	out := make([]model.Entry, 0, len(list))
@@ -87,7 +96,7 @@ func (s *Server) Search(w http.ResponseWriter, r *http.Request) {
 	// 复用 ListEntries 的模糊匹配（title/category/description）
 	list, err := s.Store.ListEntries(q, "")
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeInternalErr(w, err)
 		return
 	}
 	out := make([]model.Entry, 0, len(list))
@@ -123,8 +132,9 @@ func (s *Server) Reveal(w http.ResponseWriter, r *http.Request) {
 
 	actorID, actorName := s.tokenInfo(r)
 	eid := e.ID
+	// title/字段名可含双引号，手工拼 JSON 会产出非法结果，统一走 audit.Detail 安全构造
 	audit.Log(s.Store.DB, "token", actorID, actorName, model.ActionFieldReveal, &eid,
-		`{"title":"`+e.Title+`","field":"`+f.Key+`"}`, r.RemoteAddr)
+		audit.Detail(map[string]any{"title": e.Title, "field": f.Key}), r.RemoteAddr)
 
 	writeJSON(w, 200, map[string]any{
 		"entry_id":    e.ID,

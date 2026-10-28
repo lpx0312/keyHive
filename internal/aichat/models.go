@@ -16,7 +16,7 @@ import (
 // OpenAI 协议 GET /models；Anthropic 协议 GET /v1/models（跟随分页）。
 func ListModels(ctx context.Context, cfg Config) ([]string, error) {
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = DefaultBaseURL
+		cfg.BaseURL = cfg.defaultBaseURL() // 默认端点按协议分派，避免 anthropic 走 OpenAI 端点
 	}
 	var (
 		ids []string
@@ -105,7 +105,7 @@ func listModelsOpenAI(ctx context.Context, cfg Config) ([]string, error) {
 
 func listModelsAnthropic(ctx context.Context, cfg Config) ([]string, error) {
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = "https://api.anthropic.com"
+		cfg.BaseURL = anthropicDefaultBaseURL
 	}
 	setAuth := func(r *http.Request) {
 		r.Header.Set("x-api-key", cfg.APIKey)

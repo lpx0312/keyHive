@@ -189,13 +189,19 @@ const category = ref('')
 const loading = ref(false)
 const staleDays = ref(90)
 
+// 请求序号：搜索/筛选连发时丢弃乱序返回的旧响应，保证后发请求的结果不被先发慢响应覆盖（审查 P2 竞态）
+let loadSeq = 0
+
 async function load(resetPage = false) {
+  const seq = ++loadSeq
   loading.value = true
   try {
     const params = new URLSearchParams()
     if (q.value) params.set('q', q.value)
     if (category.value) params.set('category', category.value)
-    entries.value = (await api('/entries?' + params.toString())) || [] // 后端保证空结果为 []，此处兜底防 null 渲染崩溃
+    const list = (await api('/entries?' + params.toString())) || [] // 后端保证空结果为 []，此处兜底防 null 渲染崩溃
+    if (seq !== loadSeq) return // 期间已有更新的请求发出：本次旧响应作废
+    entries.value = list
     categories.value = (await api('/categories')) || []
     if (resetPage) {
       page.value = 1
@@ -204,9 +210,9 @@ async function load(resetPage = false) {
       page.value = Math.max(1, Math.ceil(entries.value.length / pageSize.value))
     }
   } catch (e: any) {
-    ElMessage.error(e.message)
+    if (seq === loadSeq) ElMessage.error(e.message) // 过期请求的报错不弹（此时已有新请求接管界面）
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false // loading 状态只归最新一次请求管
   }
 }
 
@@ -290,7 +296,9 @@ const exping = ref(false)
 async function doExport() {
   exping.value = true
   try {
-    let list = await api('/export')
+    // 遮蔽版走服务端脱敏（?masked=1，明文不出服务端，联调契约）；
+    // 下方客户端循环脱敏保留作双保险（防服务端契约未生效时漏出明文）
+    let list = await api(expMode.value === 'masked' ? '/export?masked=1' : '/export')
     if (expMode.value === 'masked') {
       for (const e of list) for (const f of e.fields || []) if (f.is_secret) f.value = '***'
     }

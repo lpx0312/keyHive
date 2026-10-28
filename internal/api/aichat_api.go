@@ -20,11 +20,15 @@ const (
 	settingLLMModel    = "ai_llm_model"
 )
 
-// currentLLMConfig 组装当前生效的 LLM 配置（settings 缺省时按协议默认值兜底）
+// currentLLMConfig 组装当前生效的 LLM 配置（settings 缺省时按协议默认值兜底）。
+// BaseURL 不做任何预填：空值原样传给 aichat 层，由其按协议分派默认端点
+// （openai → 智谱 OpenAI 兼容端点；anthropic → Anthropic 官方端点）。
+// 这里若协议盲地预填 aichat.DefaultBaseURL（OpenAI 端点），anthropic + 空 baseURL
+// 时 x-api-key 会被发往 open.bigmodel.cn，aichat 层的按协议分派在生产路径成为死代码。
 func (s *Server) currentLLMConfig() aichat.Config {
 	return aichat.Config{
 		Protocol: orDefault(s.getSetting(settingLLMProtocol), aichat.ProtocolOpenAI),
-		BaseURL:  orDefault(s.getSetting(settingLLMBaseURL), aichat.DefaultBaseURL),
+		BaseURL:  strings.TrimSpace(s.getSetting(settingLLMBaseURL)),
 		Model:    orDefault(s.getSetting(settingLLMModel), aichat.DefaultModel),
 	}
 }
@@ -62,14 +66,19 @@ func (s *Server) handleAIConfig(w http.ResponseWriter, r *http.Request) {
 				keyPlain = dec
 			}
 		}
-		writeJSON(w, 200, map[string]any{
-			"protocol":    orDefault(s.getSetting(settingLLMProtocol), aichat.ProtocolOpenAI),
-			"base_url":    orDefault(s.getSetting(settingLLMBaseURL), aichat.DefaultBaseURL),
-			"api_key":     maskedKey(keyPlain),
-			"model":       orDefault(s.getSetting(settingLLMModel), aichat.DefaultModel),
-			"configured":  boolStr(keyPlain != ""),
-			"presets":     aichat.Presets,
-		})
+		// base_url 存什么回什么：未设置时不下发该字段（空就空，前端表单有 placeholder），
+		// 不回填伪造的默认端点——否则前端把回显值原样保存，协议切换后的默认端点分派被固化失效
+		resp := map[string]any{
+			"protocol":   orDefault(s.getSetting(settingLLMProtocol), aichat.ProtocolOpenAI),
+			"api_key":    maskedKey(keyPlain),
+			"model":      orDefault(s.getSetting(settingLLMModel), aichat.DefaultModel),
+			"configured": boolStr(keyPlain != ""),
+			"presets":    aichat.Presets,
+		}
+		if baseURL := strings.TrimSpace(s.getSetting(settingLLMBaseURL)); baseURL != "" {
+			resp["base_url"] = baseURL
+		}
+		writeJSON(w, 200, resp)
 		return
 	}
 	var req struct {
@@ -79,7 +88,7 @@ func (s *Server) handleAIConfig(w http.ResponseWriter, r *http.Request) {
 		Model    string `json:"model"`
 	}
 	if err := readBody(r, &req); err != nil {
-		writeErr(w, 400, "请求格式错误")
+		writeReadErr(w, err)
 		return
 	}
 	if p := strings.TrimSpace(req.Protocol); p != "" {
@@ -88,19 +97,19 @@ func (s *Server) handleAIConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.putSetting(settingLLMProtocol, p); err != nil {
-			writeErr(w, 500, err.Error())
+			writeInternalErr(w, err)
 			return
 		}
 	}
 	if strings.TrimSpace(req.BaseURL) != "" {
 		if err := s.putSetting(settingLLMBaseURL, strings.TrimSpace(req.BaseURL)); err != nil {
-			writeErr(w, 500, err.Error())
+			writeInternalErr(w, err)
 			return
 		}
 	}
 	if strings.TrimSpace(req.Model) != "" {
 		if err := s.putSetting(settingLLMModel, strings.TrimSpace(req.Model)); err != nil {
-			writeErr(w, 500, err.Error())
+			writeInternalErr(w, err)
 			return
 		}
 	}
@@ -112,7 +121,7 @@ func (s *Server) handleAIConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.putSetting(settingLLMAPIKey, enc); err != nil {
-			writeErr(w, 500, err.Error())
+			writeInternalErr(w, err)
 			return
 		}
 		uid, _ := auth.UserID(r.Context())
@@ -127,7 +136,11 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		Messages []aichat.ChatMessage `json:"messages"` // 之前的对话轮次（不含本次）
 		Text     string               `json:"text"`     // 本次用户输入
 	}
-	if err := readBody(r, &req); err != nil || strings.TrimSpace(req.Text) == "" {
+	if err := readBody(r, &req); err != nil {
+		writeReadErr(w, err)
+		return
+	}
+	if strings.TrimSpace(req.Text) == "" {
 		writeErr(w, 400, "请求格式错误：需要 text 字段")
 		return
 	}
@@ -187,12 +200,12 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 	uid, _ := auth.UserID(r.Context())
 	if resp.Draft != nil {
-		detail := `{"kind":"` + resp.DraftKind + `","title":"` + resp.Draft.Title + `","category":"` + resp.Draft.Category + `"`
+		detail := map[string]any{"kind": resp.DraftKind, "title": resp.Draft.Title, "category": resp.Draft.Category}
 		if resp.DraftEntryID > 0 {
-			detail += `,"entry_id":` + fmtInt(resp.DraftEntryID)
+			detail["entry_id"] = resp.DraftEntryID
 		}
-		detail += "}"
-		audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionAIChatDraft, nil, detail, clientIP(r))
+		audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionAIChatDraft, nil,
+			audit.Detail(detail), clientIP(r))
 	}
 	writeJSON(w, 200, resp)
 }
@@ -210,7 +223,11 @@ func (s *Server) handleAIChatStream(w http.ResponseWriter, r *http.Request) {
 		Messages []aichat.ChatMessage `json:"messages"`
 		Text     string               `json:"text"`
 	}
-	if err := readBody(r, &req); err != nil || strings.TrimSpace(req.Text) == "" {
+	if err := readBody(r, &req); err != nil {
+		writeReadErr(w, err)
+		return
+	}
+	if strings.TrimSpace(req.Text) == "" {
 		writeErr(w, 400, "请求格式错误：需要 text 字段")
 		return
 	}
@@ -286,12 +303,12 @@ func (s *Server) handleAIChatStream(w http.ResponseWriter, r *http.Request) {
 		sendEvent(aichat.StreamEvent{Type: "draft", Text: resp.Reply, Draft: resp.Draft,
 			DraftKind: resp.DraftKind, DraftEntryID: resp.DraftEntryID})
 		uid, _ := auth.UserID(r.Context())
-		detail := `{"kind":"` + resp.DraftKind + `","title":"` + resp.Draft.Title + `","category":"` + resp.Draft.Category + `"`
+		detail := map[string]any{"kind": resp.DraftKind, "title": resp.Draft.Title, "category": resp.Draft.Category}
 		if resp.DraftEntryID > 0 {
-			detail += `,"entry_id":` + fmtInt(resp.DraftEntryID)
+			detail["entry_id"] = resp.DraftEntryID
 		}
-		detail += "}"
-		audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionAIChatDraft, nil, detail, clientIP(r))
+		audit.Log(s.Store.DB, "user", uid, s.usernameByID(uid), model.ActionAIChatDraft, nil,
+			audit.Detail(detail), clientIP(r))
 	}
 	sendEvent(aichat.StreamEvent{Type: "done", Text: resp.Reply})
 }
@@ -325,7 +342,7 @@ func fmtInt(n int64) string {
 	return string(b[i:])
 }
 
-// handleAIConfigTest 测试 LLM 连通性：优先用表单当前值；Key 为空/遮蔽时回退已保存值
+// handleAIConfigTest 测试 LLM 连通性（仅 admin）：优先用表单当前值；Key 为空/遮蔽时回退已保存值
 func (s *Server) handleAIConfigTest(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Protocol string `json:"protocol"`
@@ -334,7 +351,7 @@ func (s *Server) handleAIConfigTest(w http.ResponseWriter, r *http.Request) {
 		Model    string `json:"model"`
 	}
 	if err := readBody(r, &req); err != nil {
-		writeErr(w, 400, "请求格式错误")
+		writeReadErr(w, err)
 		return
 	}
 	apiKey := strings.TrimSpace(req.APIKey)
@@ -353,6 +370,7 @@ func (s *Server) handleAIConfigTest(w http.ResponseWriter, r *http.Request) {
 		apiKey = dec
 	}
 	saved := s.currentLLMConfig()
+	// 表单与已保存值均为空时 BaseURL 保持空串，由 aichat 层按协议分派默认端点
 	cfg := aichat.Config{
 		Protocol: orDefault(strings.TrimSpace(req.Protocol), saved.Protocol),
 		BaseURL:  orDefault(strings.TrimSpace(req.BaseURL), saved.BaseURL),
@@ -362,7 +380,7 @@ func (s *Server) handleAIConfigTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, aichat.TestConnection(r.Context(), cfg))
 }
 
-// handleAIListModels 拉取服务商模型清单（前端「获取模型列表」下拉用）：
+// handleAIListModels 拉取服务商模型清单（前端「获取模型列表」下拉用，仅 admin）：
 // 优先用表单当前值，Key 为空/遮蔽时回退已保存值；本地端点（Ollama 等）无 Key 也可拉取
 func (s *Server) handleAIListModels(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -371,7 +389,7 @@ func (s *Server) handleAIListModels(w http.ResponseWriter, r *http.Request) {
 		APIKey   string `json:"api_key"`
 	}
 	if err := readBody(r, &req); err != nil {
-		writeErr(w, 400, "请求格式错误")
+		writeReadErr(w, err)
 		return
 	}
 	apiKey := strings.TrimSpace(req.APIKey)
@@ -383,6 +401,7 @@ func (s *Server) handleAIListModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	saved := s.currentLLMConfig()
+	// 同上：两端都空时 BaseURL 为空串，aichat 层按协议分派默认端点
 	cfg := aichat.Config{
 		Protocol: orDefault(strings.TrimSpace(req.Protocol), saved.Protocol),
 		BaseURL:  orDefault(strings.TrimSpace(req.BaseURL), saved.BaseURL),

@@ -20,6 +20,10 @@ import (
 const (
 	anthropicVersion   = "2023-06-01"
 	anthropicMaxTokens = 4096 // Anthropic 必填参数；凭据草稿解析场景足够
+
+	// anthropicDefaultBaseURL Anthropic 官方端点；空 baseURL 时按协议分派使用，
+	// 避免 anthropic 的 x-api-key 被发往 OpenAI 默认端点
+	anthropicDefaultBaseURL = "https://api.anthropic.com"
 )
 
 // anthropicURL 根地址 + 路径 → 完整端点：base 已以 /v1 结尾只补路径，否则补 /v1
@@ -187,7 +191,7 @@ func anthropicErrMsg(data []byte) string {
 // callAnthropic 统一入口：emit=nil 走非流式，否则走流式并逐段转发回复文本
 func callAnthropic(ctx context.Context, cfg Config, msgs []llmMessage, emit func(StreamEvent) error) (*llmResponseChoice, error) {
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = "https://api.anthropic.com"
+		cfg.BaseURL = anthropicDefaultBaseURL
 	}
 	system, amsgs := toAnthropicMessages(msgs)
 	reqBody, _ := json.Marshal(anthropicRequest{
@@ -274,11 +278,26 @@ func parseAnthropicStream(body io.Reader, emit func(StreamEvent) error) (*llmRes
 				Text        string `json:"text"`
 				PartialJSON string `json:"partial_json"`
 			} `json:"delta"`
+			Error *struct {
+				Type    string `json:"type"`    // overloaded_error | rate_limit_error | ...
+				Message string `json:"message"`
+			} `json:"error"`
 		}
 		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
 			continue
 		}
 		switch ev.Type {
+		case "error":
+			// 协议规定流中途失败（限流/credit 不足/overload 等）会下发 error 事件，
+			// 必须作为错误返回，否则表现为"空/半截回复 + 成功"
+			msg := "未知错误"
+			if ev.Error != nil {
+				msg = strings.TrimSpace(ev.Error.Message)
+				if ev.Error.Type != "" {
+					msg = ev.Error.Type + ": " + msg
+				}
+			}
+			return nil, fmt.Errorf("LLM 流式错误: %s", msg)
 		case "content_block_start":
 			if ev.ContentBlock.Type == "tool_use" {
 				acc := tcs[ev.Index]

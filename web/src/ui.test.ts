@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useIsMobile, copyText, MOBILE_BREAKPOINT } from './ui'
-import { nextTick } from 'vue'
+import { nextTick, defineComponent, h } from 'vue'
+import { mount } from '@vue/test-utils'
 
 describe('useIsMobile', () => {
   const origInner = window.innerWidth
@@ -22,6 +23,33 @@ describe('useIsMobile', () => {
     Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true })
     const isMobile = useIsMobile()
     expect(isMobile.value).toBe(true)
+  })
+
+  it('组件上下文中 resize 切换 isMobile，卸载后移除监听', async () => {
+    // 覆盖 onMounted/onUnmounted 与 onResize 回调（此前仅在 effectScope 外验证初始值）
+    Object.defineProperty(window, 'innerWidth', { value: 1200, configurable: true })
+    let captured: ReturnType<typeof useIsMobile> | undefined
+    const Host = defineComponent({
+      setup() {
+        captured = useIsMobile()
+        return () => h('div', captured!.value ? 'mobile' : 'desktop')
+      },
+    })
+    const w = mount(Host)
+    expect(captured!.value).toBe(false)
+    expect(w.text()).toBe('desktop')
+    // 宽 → 窄
+    Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true })
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    expect(captured!.value).toBe(true)
+    expect(w.text()).toBe('mobile')
+    // 卸载后监听移除：resize 不再改变 ref
+    w.unmount()
+    Object.defineProperty(window, 'innerWidth', { value: 1200, configurable: true })
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    expect(captured!.value).toBe(true)
   })
 })
 

@@ -6,9 +6,21 @@ import Settings from './Settings.vue'
 const apiMock = vi.fn()
 vi.mock('../api', () => ({ api: (...a: any[]) => apiMock(...a) }))
 vi.mock('../store', () => ({ me: { id: 1, username: 'admin', isAdmin: true }, setFabHidden: vi.fn() }))
+// ElMessage 记录层：透传真实实现（保持 DOM 渲染行为），同时记录 level:message 供断言
+const { msgCalls } = vi.hoisted(() => ({ msgCalls: [] as string[] }))
 vi.mock('element-plus', async () => {
   const real = await vi.importActual<any>('element-plus')
-  return { ...real, ElMessageBox: { ...real.ElMessageBox, confirm: vi.fn().mockResolvedValue('') } }
+  const rec = (level: string) => (m: any) => {
+    msgCalls.push(`${level}:${typeof m === 'string' ? m : m?.message ?? ''}`)
+    return (real.ElMessage as any)[level](m)
+  }
+  return {
+    ...real,
+    ElMessageBox: { ...real.ElMessageBox, confirm: vi.fn().mockResolvedValue('') },
+    ElMessage: Object.assign((...a: any[]) => (real.ElMessage as any)(...a), {
+      error: rec('error'), success: rec('success'), warning: rec('warning'), info: rec('info'),
+    }),
+  }
 })
 
 const presets = [
@@ -41,6 +53,7 @@ describe('Settings.vue', () => {
     mockDefaults()
     localStorage.clear()
     document.body.innerHTML = '' // 清理前序测试 teleport 到 body 的下拉/弹层残留
+    msgCalls.length = 0
   })
 
   it('挂载加载 AI 配置/轮换阈值/版本，预设回显匹配项', async () => {
@@ -305,5 +318,26 @@ describe('Settings.vue', () => {
     expect(w.text()).not.toContain('轮换主密钥')
     expect(w.text()).not.toContain('密码轮换提醒')
     ;(me as any).isAdmin = saved
+  })
+
+  // ---- 缺陷修复回归（审查 P2：Settings.vue change() 修改密码无 try/catch，已补 catch + ElMessage.error） ----
+  // 场景：旧密码错误（POST /password 返回错误）。正确行为：失败时向用户展示错误信息（ElMessage.error）。
+  it('修改密码失败（旧密码错误）应向用户展示错误提示', async () => {
+    apiMock.mockImplementation((path: string) => {
+      if (path === '/password') return Promise.reject(new Error('旧密码不正确'))
+      if (path === '/ai-config') return Promise.resolve({ presets, protocol: 'openai', base_url: 'u', api_key: '', model: 'm', configured: 'false' })
+      return Promise.resolve(path === '/version' ? { version: 't' } : { stale_days: 90 })
+    })
+    const w = mount(Settings, { global: { plugins: [ElementPlus] } })
+    await flushPromises()
+    msgCalls.length = 0
+    const pwInputs = w.findAll('input[type="password"]')
+    await pwInputs[0].setValue('wrong-old-pass')
+    await pwInputs[1].setValue('new-pass-1234')
+    await pwInputs[2].setValue('new-pass-1234')
+    await w.findAll('button').filter(b => b.text().includes('修改（'))[0].trigger('click')
+    await flushPromises()
+    expect(msgCalls.some(c => c.startsWith('error:') && c.includes('旧密码不正确'))).toBe(true)
+    w.unmount()
   })
 })

@@ -136,6 +136,10 @@ func readKeyFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("读取密钥文件失败: %w", err)
 	}
+	// 空文件/纯空白会使主密钥退化为公开常量 SHA-256("")，加密形同虚设，必须拒绝启动
+	if strings.TrimSpace(string(data)) == "" {
+		return nil, fmt.Errorf("密钥文件 %s 内容为空（可能是误创建或写入截断），请删除该文件后重启服务以自动生成新密钥", path)
+	}
 	return deriveKey(strings.TrimSpace(string(data))), nil
 }
 

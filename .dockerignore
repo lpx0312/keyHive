@@ -1,0 +1,36 @@
+# 构建上下文最小化：Dockerfile 在镜像内自行构建前端（web stage → npm run build），
+# 后端构建只需 go.mod/go.sum、cmd/、internal/、web/web.go，web/dist 由 COPY --from=web 注入，
+# 因此本地 dist 与依赖均可排除。严禁把 data/（含 master.key）送进构建上下文。
+
+# 版本控制 / 会话与 IDE 元数据
+.git
+.github
+.zcode
+.claude-plugin
+.zcodeignore
+.gitignore
+.idea
+.vscode
+
+# 本地数据（含 master.key！）与本地产物
+data/
+tmpdata/
+*.log
+*.jar
+**/*.jar
+*.exe
+**/*.exe
+/keyhive
+
+# 前端：依赖 / 本地构建产物 / 覆盖率（镜像内重新生成）
+web/node_modules
+web/dist
+web/coverage
+
+# 文档与本地编排文件（镜像构建不需要）
+docs/
+skills/
+*.md
+**/*.md
+docker-compose.yml
+.dockerignore
