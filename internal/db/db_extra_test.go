@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -98,11 +99,20 @@ func TestMigratePreferAdminNamedUser(t *testing.T) {
 	}
 }
 
-// Open 到不可写位置 → 报错
+// Open 到不可写位置 → 报错（跨平台：两种路径在 Windows/Linux 均必然失败）
 func TestOpenBadPath(t *testing.T) {
-	// Windows 保留设备名做路径，创建必失败
-	if _, err := Open(`NUL\:\invalid|path\x.db`); err == nil {
-		t.Fatal("非法路径应报错")
+	dir := t.TempDir()
+	// 父目录不存在：SQLite 不会自动建目录
+	if _, err := Open(filepath.Join(dir, "noexist", "x.db")); err == nil {
+		t.Fatal("父目录不存在应报错")
+	}
+	// 普通文件被当目录用
+	f := filepath.Join(dir, "afile")
+	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(filepath.Join(f, "x.db")); err == nil {
+		t.Fatal("文件作为父目录应报错")
 	}
 }
 
