@@ -1,18 +1,20 @@
 package main
 
 import (
-	"io/fs"
 	"net/http"
 	"strings"
 	"testing"
-
-	"github.com/lpx0312/keyHive/web"
+	"testing/fstest"
 )
 
 // spaHandler 目录形路径与回退边界（补 TestSPAHandlerDirect 未覆盖的形态）：
 // 依赖 embed.FS 对带斜杠路径 Stat 必然失败来回退，这一隐式行为在此锁定
 func TestSPAHandlerDirPathsAndFallback(t *testing.T) {
-	dist, _ := fs.Sub(web.Dist, "dist")
+	// 合成 dist：assets 产物被 .gitignore 排除，CI 检出无构建产物（同 main_test.go 说明）
+	dist := fstest.MapFS{
+		"index.html":        {Data: []byte("<!DOCTYPE html><html>keyhive</html>")},
+		"assets/app.abc.js": {Data: []byte("console.log(1)")},
+	}
 	h := spaHandler(dist)
 
 	get := func(path string) *respRecorder {

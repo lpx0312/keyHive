@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"io"
-	"io/fs"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -12,12 +11,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 
 	"github.com/lpx0312/keyHive/internal/auth"
 	"github.com/lpx0312/keyHive/internal/crypto"
 	kdb "github.com/lpx0312/keyHive/internal/db"
-	"github.com/lpx0312/keyHive/web"
 )
 
 // e2eEnv 完整复刻 runServe 的组装（真实文件库 + 主密钥文件 + embed 前端）
@@ -245,14 +244,14 @@ func TestEnsureKeyCheck(t *testing.T) {
 }
 
 func TestSPAHandlerDirect(t *testing.T) {
-	dist, _ := fs.Sub(web.Dist, "dist")
-	// 找一个真实存在的 assets 文件验证长缓存头
-	matches, _ := fs.Glob(dist, "assets/*.js")
-	if len(matches) == 0 {
-		t.Fatal("dist 中应有 assets 产物")
+	// 合成 dist：真实 web/dist 的 assets 产物被 .gitignore 排除（CI 全新检出不存在），
+	// 缓存头断言不依赖本地构建产物，保证任意环境行为一致
+	dist := fstest.MapFS{
+		"index.html":        {Data: []byte("<!DOCTYPE html><html>keyhive</html>")},
+		"assets/app.abc.js": {Data: []byte("console.log(1)")},
 	}
 	h := spaHandler(dist)
-	req, _ := http.NewRequest("GET", "/"+matches[0], nil)
+	req, _ := http.NewRequest("GET", "/assets/app.abc.js", nil)
 	w := newRecorder()
 	h.ServeHTTP(w, req)
 	if w.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
