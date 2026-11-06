@@ -25,9 +25,13 @@
     `category_templates`、`audit_logs`、`settings`——及两个索引
     `idx_entries_category`、`idx_audit_created(created_at DESC)`。
   - 路径非法、父目录不可创建、迁移 SQL 失败时返回 error；支持 `":memory:"`。
-  - 调用方负责 `Close`（`cmd/keyhive.buildServer` 出错路径与成功路径均已处理）。
-- 连接配置固定四条 PRAGMA：`journal_mode(WAL)`、`foreign_keys(1)`、
-  `busy_timeout(5000)`、`synchronous(NORMAL)`。
+  - 调用方负责 `Close`：`buildServer` 出错路径自行关闭；正常停机由
+    `cmd/keyhive.runServe` 的 `defer closeDatabase` 先执行
+    `PRAGMA wal_checkpoint(TRUNCATE)` 再关闭连接，保证 `-wal/-shm` 不残留。
+- 连接配置固定五条 PRAGMA：`journal_mode(WAL)`、`foreign_keys(1)`、
+  `busy_timeout(5000)`、`synchronous(NORMAL)`、`journal_size_limit(1048576)`。
+  最后一条让自动 checkpoint 后 WAL 收缩到 1MB 以内，避免默认 1000 页
+  autocheckpoint 的高水位（约 4MB）长期常驻数据目录。
 - `SetMaxOpenConns(1)` 的原因：SQLite 并发写有限，单连接串行化所有语句以避免
   `database is locked`；代价是全库读写共用一个连接，吞吐靠 WAL 下读多写少的
   负载特征保障。

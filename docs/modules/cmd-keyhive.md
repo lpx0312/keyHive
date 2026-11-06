@@ -11,9 +11,10 @@ embed SPA"的全量组装，并集中配置 HTTP 超时与静态资源缓存策�
 
 | 文件 | 关键函数/类型 | 说明 |
 |---|---|---|
-| main.go | `main` | 调 `dispatch(os.Args[1:])`，返回 ≥0 则以该码退出，否则 `runServe` |
+| main.go | `main` | 调 `dispatch(os.Args[1:])`，返回 ≥0 则以该码退出；否则注册 SIGINT/SIGTERM 并调 `runServe(ctx)` |
 | main.go | `dispatch(args []string) int` | 子命令分发；返回 -1 表示继续启动服务；未知子命令 `log.Fatalf` |
-| main.go | `runServe`（内部） | 读 `KEYHIVE_ADDR`/`KEYHIVE_DATA` 环境变量，调 `buildServer` 后 `srv.ListenAndServe()` |
+| main.go | `runServe(ctx) error`（内部） | 读 `KEYHIVE_ADDR`/`KEYHIVE_DATA`，`buildServer` 后起服务；ctx 取消时 `srv.Shutdown` + `closeDatabase` 优雅停机 |
+| main.go | `closeDatabase(db)`（内部） | 关闭前 `PRAGMA wal_checkpoint(TRUNCATE)`，再 `db.Close()` 让 `-wal/-shm` 不残留 |
 | main.go | `buildServer(dataDir) (*http.Server, *sql.DB, error)`（内部） | 组装数据库+主密钥+全部路由；`runServe` 与测试共用；返回的 `*sql.DB` 由调用方关闭 |
 | main.go | `ensureKeyCheck(db, cipher)`（内部） | `settings.key_check` 首启写入、非首启校验主密钥匹配 |
 | main.go | `spaHandler(dist fs.FS) http.Handler`（内部） | SPA 静态资源：路由回退 + 分级缓存头 + gzip |
@@ -29,7 +30,7 @@ embed SPA"的全量组装，并集中配置 HTTP 超时与静态资源缓存策�
   - `login/list/search/get/reveal/status/add/edit/totp/export/import/rotate-key/
     help/-h/--help` → 透传 `cli.Run(args)` 的返回码；
   - `"mcp"` → 透传 `mcpserver.Run()` 的返回码；
-  - 其余子命令 `log.Fatalf`（退出码 2）。
+  - 其余子命令 `log.Fatalf`（实际退出码 **1**——`log.Fatalf` 内部 `os.Exit(1)`，其后 `return 2` 不可达）。
 - `buildServer` 的失败路径与路由结构：
   - 失败三类：主密钥加载失败、数据库打开失败、key_check 不匹配；
   - 成功时日志打印版本与主密钥来源 `keySrc.Desc`；
@@ -38,9 +39,11 @@ embed SPA"的全量组装，并集中配置 HTTP 超时与静态资源缓存策�
     `read` 组（GET `/entries`、`/entries/{id}`）、`search` 组（GET `/search`）、
     `reveal` 组（POST `/entries/{id}/reveal`）；
   - `/*` 交给 `spaHandler`（`fs.Sub(web.Dist, "dist")`）。
-- `runServe`：`KEYHIVE_ADDR` 默认 `:8020`，`KEYHIVE_DATA` 默认 `./data`；
-  必须用 `srv.ListenAndServe()` 让 buildServer 里设置的超时生效
-  （`http.ListenAndServe` 会另建零配置 server）。
+- `runServe(ctx)`：`KEYHIVE_ADDR` 默认 `:8020`，`KEYHIVE_DATA` 默认 `./data`；
+  用 `srv.ListenAndServe()` 让 buildServer 里设置的超时生效，同时在独立 goroutine
+  里监听；ctx 取消后 8s 内 `srv.Shutdown` 等待活跃请求（含 SSE），超时则
+  `srv.Close()`。**不再用 `log.Fatal` 中途 `os.Exit`**，所有退出路径统一走
+  `defer closeDatabase`，保证 SQLite 最后一个连接正常关闭。
 
 ## 依赖关系
 
@@ -78,6 +81,10 @@ embed SPA"的全量组装，并集中配置 HTTP 超时与静态资源缓存策�
   - `TestSPAHandlerDirect` 锚定 assets 长缓存头、根路径 no-cache、未命中回退 no-cache；
   - `TestE2EStaticAssets`/`TestBuildServerErrorPaths`/`TestEnvOr` 锚定静态访问、
     密钥篡改与非法目录失败路径、环境变量 trim。
-- `serve_test.go`：`TestRunServeSmoke` 真实起服务探活 `/api/v1/version` 并断言
-  `master.key` 与 `keyhive.db` 已生成；`TestDispatch` 锚定各子命令返回码
-  （default 分支 log.Fatalf 不可测，跳过）。
+- `serve_test.go`：
+  - `TestRunServeSmoke` 以 `runServe(ctx)` 真实起服务探活 `/api/v1/version`，
+    断言 `master.key` 与 `keyhive.db` 已生成，再 `cancel` 优雅收尾（不再泄漏 goroutine）；
+  - `TestRunServeGracefulShutdownReleasesWAL` 锚定优雅停机修复：运行期 `-wal` 存在，
+    停机后 `-wal/-shm` 均消失、WAL 中未 checkpoint 的数据已合并回主库、端口已释放；
+  - `TestRunServeListenFailureReturnsError` 锚定监听失败返回 error 而非 `os.Exit`；
+  - `TestDispatch` 锚定各子命令返回码（default 分支 log.Fatalf 不可测，跳过）。

@@ -11,6 +11,8 @@ services:
     image: keyhive:latest
     container_name: keyhive
     restart: unless-stopped
+    # 优雅停机 8s + 余量，避免默认 10s grace period 的 SIGKILL 打断 WAL checkpoint
+    stop_grace_period: 20s
     ports:
       - "8020:8020"
     environment:

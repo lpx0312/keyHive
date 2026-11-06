@@ -18,7 +18,9 @@ func Open(path string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)", path)
+	// journal_size_limit 让自动 checkpoint 后把 WAL 收缩到 1MB 以内，避免默认
+	// 1000 页 autocheckpoint 的高水位（约 4MB）长期常驻数据目录。
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=journal_size_limit(1048576)", path)
 	d, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -135,6 +137,9 @@ func migrateUsersColumns(d *sql.DB) error {
 		existing[name] = true
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
 	for _, col := range []string{"is_admin", "disabled"} {
 		if !existing[col] {
@@ -183,6 +188,9 @@ func migrateEntriesColumns(d *sql.DB) error {
 		existing[name] = true
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
 	if !existing["tags"] {
 		if _, err := d.Exec(`ALTER TABLE entries ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'`); err != nil {

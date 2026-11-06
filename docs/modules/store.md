@@ -18,7 +18,8 @@
 
 - `type Store struct`：
   - 导出字段 `DB *sql.DB`、`Cipher *crypto.Cipher`、`DataDir / KeyFilePath string`、`KeyFromEnv bool`——后三者供 rotate 决定新密钥持久化位置（写文件还是返回给管理员改 env）；
-  - `Cipher` 由内部 `sync.RWMutex` 保护，`cipher()` 并发安全读取（rotate 期间读写不撕裂）。
+  - `Cipher` 由内部 `sync.RWMutex` 保护，`cipher()` 并发安全读取（rotate 期间读写不撕裂）；
+    跨包读取一律走新增的 `CurrentCipher()`，不可直读导出字段 `Cipher`。
 - `NewForTest(db) (*Store, error)`：测试夹具，随机 32 字节主密钥构造（kdbtest 间接使用）。
 - 条目操作：
   - `CreateEntry(*model.Entry) error`：先 `Validate`，敏感字段加密后落库，回填 ID 与 created/updated 时间；

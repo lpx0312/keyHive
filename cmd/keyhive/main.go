@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -8,7 +9,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -31,7 +34,11 @@ func main() {
 	if code := dispatch(os.Args[1:]); code >= 0 {
 		os.Exit(code)
 	}
-	runServe()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := runServe(ctx); err != nil {
+		log.Fatal(err)
+	}
 }
 
 // dispatch 子命令分发：返回 -1 表示继续启动服务
@@ -55,20 +62,60 @@ func dispatch(args []string) int {
 	}
 }
 
-func runServe() {
+// shutdownTimeout 优雅停机等待活跃请求（含 SSE 长流）的上限。
+// 8s < Docker 默认 10s stop grace period，超时后强制 Close 并让 runServe 正常返回，
+// 避免被 SIGKILL 打断 defer closeDatabase。
+const shutdownTimeout = 8 * time.Second
+
+// runServe 启动 HTTP 服务，直到 ctx 被取消（SIGINT/SIGTERM）或监听失败。
+// 与旧实现的差别：不再用 log.Fatal 中途 os.Exit，退出路径统一走 defer closeDatabase，
+// 保证 SQLite 最后一个连接正常关闭 → WAL checkpoint、-wal/-shm 不再残留。
+// ctx 由调用方注入，测试可直接 cancel 验证优雅停机。
+func runServe(ctx context.Context) error {
 	addr := envOr("KEYHIVE_ADDR", ":8020")
 	dataDir := envOr("KEYHIVE_DATA", "./data")
 
 	srv, db, err := buildServer(dataDir)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	defer db.Close()
+	defer closeDatabase(db)
 	log.Printf("keyHive 启动完成: http://localhost%s (数据目录 %s)", addr, dataDir)
+
 	srv.Addr = addr
 	// 用 srv.ListenAndServe 让 buildServer 里设置的超时生效（http.ListenAndServe 会另建零配置 server）
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatal(err)
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("HTTP 服务异常退出: %w", err)
+		}
+		return nil
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("优雅停机超时，强制关闭连接: %v", err)
+			_ = srv.Close()
+		}
+		if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("HTTP 服务异常退出: %w", err)
+		}
+		return nil
+	}
+}
+
+// closeDatabase 关闭前把 WAL 合并回主库并截断，避免停机后 -wal/-shm 残留。
+// checkpoint 失败也不影响数据安全：WAL 会在下次启动时自动回放；
+// 真正删除这两个文件的是随后最后一个连接的正常关闭。
+func closeDatabase(db *sql.DB) {
+	if _, err := db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		log.Printf("WAL checkpoint 失败（下次启动自动回放）: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		log.Printf("关闭数据库失败: %v", err)
 	}
 }
 

@@ -88,3 +88,25 @@ func TestSeedAdminShape(t *testing.T) {
 		t.Fatalf("seeded 标记缺失: %v %q", err, seeded)
 	}
 }
+
+// TestJournalSizeLimitAndCheckpoint 验证 DSN 第五条 PRAGMA 确实生效（防止驱动静默忽略），
+// 以及停机路径 closeDatabase 用的 checkpoint 语句在 modernc 驱动下可执行。
+func TestJournalSizeLimitAndCheckpoint(t *testing.T) {
+	d, err := Open(filepath.Join(t.TempDir(), "kh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	var limit int
+	if err := d.QueryRow(`PRAGMA journal_size_limit`).Scan(&limit); err != nil {
+		t.Fatalf("读取 journal_size_limit 失败: %v", err)
+	}
+	if limit != 1048576 {
+		t.Fatalf("journal_size_limit 应为 1048576，实际 %d（DSN pragma 未生效？）", limit)
+	}
+	// 这条 PRAGMA 会返回一行结果，确认用 Exec 执行不会报错（closeDatabase 依赖它）
+	if _, err := d.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		t.Fatalf("wal_checkpoint(TRUNCATE) 执行失败: %v", err)
+	}
+}

@@ -62,7 +62,7 @@ func (s *Server) handleAIConfig(w http.ResponseWriter, r *http.Request) {
 		keyEnc := s.getSetting(settingLLMAPIKey)
 		keyPlain := ""
 		if keyEnc != "" {
-			if dec, err := s.Store.Cipher.Decrypt(keyEnc); err == nil {
+			if dec, err := s.Store.CurrentCipher().Decrypt(keyEnc); err == nil {
 				keyPlain = dec
 			}
 		}
@@ -115,7 +115,7 @@ func (s *Server) handleAIConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	// key 以 **** 开头（遮蔽回显值）视为未修改；空串视为清除
 	if strings.TrimSpace(req.APIKey) != "" && !strings.HasPrefix(strings.TrimSpace(req.APIKey), "****") {
-		enc, err := s.Store.Cipher.Encrypt(strings.TrimSpace(req.APIKey))
+		enc, err := s.Store.CurrentCipher().Encrypt(strings.TrimSpace(req.APIKey))
 		if err != nil {
 			writeErr(w, 500, "加密失败")
 			return
@@ -153,7 +153,7 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "AI 未配置：请先在「设置 → AI 配置」填写 API Key")
 		return
 	}
-	apiKey, err := s.Store.Cipher.Decrypt(keyEnc)
+	apiKey, err := s.Store.CurrentCipher().Decrypt(keyEnc)
 	if err != nil {
 		writeErr(w, 500, "API Key 解密失败（主密钥变更？）")
 		return
@@ -240,7 +240,7 @@ func (s *Server) handleAIChatStream(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "AI 未配置：请先在「设置 → AI 配置」填写 API Key")
 		return
 	}
-	apiKey, err := s.Store.Cipher.Decrypt(keyEnc)
+	apiKey, err := s.Store.CurrentCipher().Decrypt(keyEnc)
 	if err != nil {
 		writeErr(w, 500, "API Key 解密失败（主密钥变更？）")
 		return
@@ -362,7 +362,7 @@ func (s *Server) handleAIConfigTest(w http.ResponseWriter, r *http.Request) {
 				"error": "未填写 API Key，且系统里也没有已保存的 Key"})
 			return
 		}
-		dec, err := s.Store.Cipher.Decrypt(keyEnc)
+		dec, err := s.Store.CurrentCipher().Decrypt(keyEnc)
 		if err != nil {
 			writeJSON(w, 500, map[string]any{"ok": false, "error": "已保存 Key 解密失败"})
 			return
@@ -395,7 +395,7 @@ func (s *Server) handleAIListModels(w http.ResponseWriter, r *http.Request) {
 	apiKey := strings.TrimSpace(req.APIKey)
 	if apiKey == "" || strings.HasPrefix(apiKey, "****") {
 		if keyEnc := s.getSetting(settingLLMAPIKey); keyEnc != "" {
-			if dec, err := s.Store.Cipher.Decrypt(keyEnc); err == nil {
+			if dec, err := s.Store.CurrentCipher().Decrypt(keyEnc); err == nil {
 				apiKey = dec
 			}
 		}

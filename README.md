@@ -57,7 +57,7 @@ docker logs keyhive 2>&1 | grep 初始密码
 
 ```bash
 docker pull registry.cn-hangzhou.aliyuncs.com/lpx03/keyhive:latest
-docker stop keyhive && docker rm keyhive
+docker stop -t 20 keyhive && docker rm keyhive
 # 重新执行上面的 docker run 命令；数据卷不删则数据无损
 ```
 
@@ -159,7 +159,21 @@ CI 示例（GitHub Actions 中取密码做 docker login）：
 
 ## 备份
 
-数据全在 `data/` 卷（或 `KEYHIVE_DATA` 目录）：`keyhive.db` + `master.key`。**两者一起备份**，拷贝文件即完成。
+数据全在 `data/` 卷（或 `KEYHIVE_DATA` 目录）：`keyhive.db` + `master.key`，两者必须一起备份
+（缺 `master.key` 则库内密文全部不可解）。
+
+> ⚠️ 数据库使用 SQLite WAL 模式。服务运行中或异常停机时，目录下会出现
+> `keyhive.db-wal` / `keyhive.db-shm`，其中可能含有**尚未合并进 `keyhive.db` 的已提交数据**。
+> 此时单独拷贝 `keyhive.db` 会拿到旧快照。
+
+推荐做法（选一）：
+
+1. **在线一致性备份**：`sqlite3 keyhive.db ".backup /path/to/backup.db"`，再拷 `master.key`；
+2. **停服后直拷**：`docker stop -t 20 keyhive`（程序收到 SIGTERM 会优雅停机并自动 checkpoint），
+   确认目录下已无 `-wal` / `-shm` 后，拷 `keyhive.db` + `master.key`；
+3. **无法停服**：把 `keyhive.db`、`keyhive.db-wal`、`keyhive.db-shm`、`master.key` 四个文件一起拷贝。
+
+若目录里残留 `-wal`，可用 `sqlite3 keyhive.db "PRAGMA wal_checkpoint(TRUNCATE);"` 手动合并回主库。
 
 ## 配置
 

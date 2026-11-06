@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"context"
 	"net"
 	"net/http"
 	"os"
@@ -9,45 +9,75 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	kdb "github.com/lpx0312/keyHive/internal/db"
 )
 
-// TestRunServeSmoke 真实 runServe：起服务（goroutine 内阻塞）→ 探活 → 版本接口可用。
-// ListenAndServe 正常运行不返回，测试结束时进程退出带走 goroutine。
-func TestRunServeSmoke(t *testing.T) {
-	// 找一个空闲端口（Listen(":0") 拿到后关闭，交由 runServe 使用）
+// freeAddr 取一个当前空闲的本地地址（拿到后立即释放，交给 runServe 绑定）
+func freeAddr(t *testing.T) string {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	addr := ln.Addr().String()
 	ln.Close()
+	return addr
+}
 
-	// runServe 的 goroutine 会持有 keyhive.db 句柄（Windows 下 TempDir 清理会失败），
-	// 故用手动目录并容忍删除失败
-	root, err := os.MkdirTemp("", "keyhive-serve")
-	if err != nil {
-		t.Fatal(err)
+// waitReady 轮询公开的版本接口直到服务就绪
+func waitReady(t *testing.T, addr string) {
+	t.Helper()
+	var lastErr error
+	for i := 0; i < 50; i++ {
+		resp, err := http.Get("http://" + addr + "/api/v1/version")
+		if err == nil {
+			resp.Body.Close()
+			return
+		}
+		lastErr = err
+		time.Sleep(100 * time.Millisecond)
 	}
-	dataDir := filepath.Join(root, "srv")
-	t.Cleanup(func() { os.RemoveAll(root) }) // 服务句柄未释放时删除失败可容忍
+	t.Fatalf("服务未就绪: %v", lastErr)
+}
+
+// setServeEnv 隔离环境变量与数据目录
+func setServeEnv(t *testing.T, addr, dataDir string) {
+	t.Helper()
 	t.Setenv("KEYHIVE_ADDR", addr)
 	t.Setenv("KEYHIVE_DATA", dataDir)
 	t.Setenv("KEYHIVE_MASTER_KEY", "")
 	t.Setenv("KEYHIVE_KEYFILE", "")
+}
 
-	go runServe() // 正常运行时一直阻塞
-
-	base := "http://" + addr
-	var resp *http.Response
-	for i := 0; i < 50; i++ { // 等服务就绪
-		resp, err = http.Get(base + "/api/v1/version")
-		if err == nil {
-			break
+// waitDone 等 runServe 返回；超时即视为优雅停机卡死
+func waitDone(t *testing.T, done <-chan error) {
+	t.Helper()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("优雅停机应返回 nil，实际 %v", err)
 		}
-		time.Sleep(100 * time.Millisecond)
+	case <-time.After(15 * time.Second):
+		t.Fatal("优雅停机超时（15s）")
 	}
+}
+
+// TestRunServeSmoke 真实 runServe(ctx)：起服务 → 探活 → cancel 优雅停机。
+// 旧实现用 go runServe() 且永不返回，会泄漏 goroutine 与 db 句柄；现在可干净收尾。
+func TestRunServeSmoke(t *testing.T) {
+	addr := freeAddr(t)
+	dataDir := filepath.Join(t.TempDir(), "srv")
+	setServeEnv(t, addr, dataDir)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runServe(ctx) }()
+
+	waitReady(t, addr)
+	resp, err := http.Get("http://" + addr + "/api/v1/version")
 	if err != nil {
-		t.Fatalf("服务未就绪: %v", err)
+		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	buf := make([]byte, 128)
@@ -57,13 +87,94 @@ func TestRunServeSmoke(t *testing.T) {
 		t.Fatalf("version 接口异常: %d %s", resp.StatusCode, body)
 	}
 	// 数据目录已生成 master.key 与库文件
-	if _, err := os.Stat(filepath.Join(dataDir, "master.key")); err != nil {
-		t.Fatalf("master.key 未生成: %v", err)
+	for _, f := range []string{"master.key", "keyhive.db"} {
+		if _, err := os.Stat(filepath.Join(dataDir, f)); err != nil {
+			t.Fatalf("%s 未生成: %v", f, err)
+		}
 	}
-	if _, err := os.Stat(filepath.Join(dataDir, "keyhive.db")); err != nil {
-		t.Fatalf("数据库未生成: %v", err)
+
+	cancel()
+	waitDone(t, done)
+}
+
+// TestRunServeGracefulShutdownReleasesWAL 复现线上现象：WAL 模式下运行期
+// -wal/-shm 存在；优雅停机后二者必须消失，且 WAL 中未 checkpoint 的数据不丢。
+func TestRunServeGracefulShutdownReleasesWAL(t *testing.T) {
+	addr := freeAddr(t)
+	dataDir := filepath.Join(t.TempDir(), "data")
+	setServeEnv(t, addr, dataDir)
+	dbPath := filepath.Join(dataDir, "keyhive.db")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runServe(ctx) }()
+	waitReady(t, addr)
+
+	// 运行期 WAL 文件必然存在
+	if _, err := os.Stat(dbPath + "-wal"); err != nil {
+		t.Fatalf("运行期应有 -wal: %v", err)
 	}
-	_ = fmt.Sprint
+
+	// 借第二个连接写一条数据，制造"尚未 checkpoint 进主库"的 WAL 帧。
+	// 该连接关闭时 runServe 的连接仍开着，WAL 不会被提前删除。
+	const probeKey, probeVal = "wal_probe", "alive"
+	d, err := kdb.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = d.Exec(`INSERT INTO settings(key, value) VALUES(?, ?)`, probeKey, probeVal)
+	d.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cancel()
+	waitDone(t, done)
+
+	// 核心断言：最后一个连接正常关闭 → checkpoint + 删除 -wal/-shm
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if _, err := os.Stat(dbPath + suffix); !os.IsNotExist(err) {
+			t.Errorf("停机后 %s 应被删除，实际 stat: %v", suffix, err)
+		}
+	}
+
+	// WAL 里的数据必须已合并回主库
+	d2, err := kdb.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	err = d2.QueryRow(`SELECT value FROM settings WHERE key = ?`, probeKey).Scan(&got)
+	d2.Close()
+	if err != nil || got != probeVal {
+		t.Fatalf("WAL 数据未合并回主库: value=%q err=%v", got, err)
+	}
+
+	// 端口已释放
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("停机后端口未释放: %v", err)
+	}
+	ln.Close()
+}
+
+// TestRunServeListenFailureReturnsError 监听失败时 runServe 应返回 error
+// （旧实现 log.Fatal → os.Exit 会直接杀掉进程），且 defer closeDatabase 仍执行。
+func TestRunServeListenFailureReturnsError(t *testing.T) {
+	// 非法端口跨平台稳定失败，不依赖 SO_REUSEADDR 的平台差异
+	dataDir := filepath.Join(t.TempDir(), "data")
+	setServeEnv(t, "127.0.0.1:70000", dataDir)
+
+	err := runServe(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "HTTP 服务异常退出") {
+		t.Fatalf("监听失败应返回包装后的 error，实际 %v", err)
+	}
+	dbPath := filepath.Join(dataDir, "keyhive.db")
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if _, statErr := os.Stat(dbPath + suffix); !os.IsNotExist(statErr) {
+			t.Errorf("失败路径也应释放数据库、删除 %s，实际 stat: %v", suffix, statErr)
+		}
+	}
 }
 
 // dispatch 分发逻辑（default 分支 log.Fatalf 不可测，跳过）
@@ -93,4 +204,3 @@ func TestDispatch(t *testing.T) {
 		t.Fatalf("help 应 2（usage），实际 %d", got)
 	}
 }
-

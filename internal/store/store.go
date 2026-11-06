@@ -16,7 +16,7 @@ import (
 
 // Store 条目/模板存取：负责 fields JSON 与敏感字段加解密的衔接。
 // rotate-key 会并发替换 Cipher，故以 RWMutex 保护；DataDir/KeyFilePath/KeyFromEnv
-// 供密钥轮换时决定新密钥的持久化位置。
+// 供密钥轮换时决定新密钥的持久化位置；跨包读取必须用 CurrentCipher()，不可直读 Cipher。
 type Store struct {
 	DB          *sql.DB
 	Cipher      *crypto.Cipher
@@ -39,6 +39,12 @@ func (s *Store) cipher() *crypto.Cipher {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.Cipher
+}
+
+// CurrentCipher 供其它包并发安全地取当前密钥。rotate-key 会在写锁下替换
+// s.Cipher，跨包直接读该导出字段会与写锁产生数据竞争，必须走这里。
+func (s *Store) CurrentCipher() *crypto.Cipher {
+	return s.cipher()
 }
 
 func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }

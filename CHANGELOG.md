@@ -2,6 +2,30 @@
 
 本文件记录 keyHive 各版本变更。格式：**安全 / 新增 / 修复 / 交付 / 文档与测试**。
 
+## [Unreleased]
+
+### 修复（Fixed）
+
+- **优雅停机**：SIGTERM/SIGINT → `srv.Shutdown`（8s 上限）→ 关闭前
+  `PRAGMA wal_checkpoint(TRUNCATE)` → `db.Close()`。旧实现 `defer db.Close()` 被
+  信号直接终止跳过，容器停止后残留 `keyhive.db-wal` / `keyhive.db-shm`；
+  `log.Fatal` 的 `os.Exit` 同样跳过 defer，现统一改为返回 error
+- DSN 补 `journal_size_limit(1048576)`：自动 checkpoint 后 WAL 收缩到 1MB 以内，
+  不再长期常驻默认 1000 页 autocheckpoint 的约 4MB 高水位
+- AI 配置接口 6 处改走 `Store.CurrentCipher()`，消除 rotate-key 写锁替换 `Cipher`
+  期间跨包直读该字段的数据竞争
+- 迁移探测 `pragma table_info` 遍历后补 `rows.Err()` 检查
+
+### 文档与测试
+
+- README 备份段补充 WAL 说明：只拷 `keyhive.db` 可能拿到旧快照，给出三种备份方式；
+  升级命令改 `docker stop -t 20`
+- 新增 `TestRunServeGracefulShutdownReleasesWAL`（停机后 `-wal/-shm` 消失且 WAL 数据
+  合并回主库）、`TestRunServeListenFailureReturnsError`、
+  `TestJournalSizeLimitAndCheckpoint`；`TestRunServeSmoke` 改为可优雅收尾，不再泄漏
+  goroutine 与 db 句柄
+- `docker-compose.yml` 加 `stop_grace_period: 20s`
+
 ## [1.4.0] — 未发布（本轮工作区，待打 tag）
 
 > 全仓质量工程轮：10 路并行代码审查（107 项发现）→ 25 项修复 + 约 100 个新增测试 → 两轮多角色复审（安全架构师 / Go 工程 / 前端 / SRE / 独立审计 / 发布经理）。过程档案见 `docs/review/`。
